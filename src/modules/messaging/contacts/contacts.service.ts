@@ -23,8 +23,15 @@ export class ContactsService {
   }
 
   async update(id: string, organizationId: string, dto: UpdateContactDto) {
-    await this.findOne(id, organizationId);
-    return this.repository.update(id, dto);
+    const existing = await this.findOne(id, organizationId);
+    const data: UpdateContactDto = { ...dto };
+    // metadata é JSON — mesclar com o existente pra não apagar outras chaves
+    // (ex: origem gravada aqui não deve zerar enriquecimento do provider).
+    if (dto.metadata) {
+      const current = (existing.metadata as Record<string, any>) ?? {};
+      data.metadata = { ...current, ...dto.metadata };
+    }
+    return this.repository.update(id, data);
   }
 
   async remove(id: string, organizationId: string) {
