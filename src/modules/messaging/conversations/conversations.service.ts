@@ -21,6 +21,7 @@ import {
 } from '../../iam/channel-access/channel-access.service';
 import { AgentRouterService } from '../../ai-agents/router/agent-router.service';
 import { AiAgentRunnerService } from '../../ai-agents/runner/agent-runner.service';
+import { LlmService } from '../../ai-agents/llm/llm.service';
 import { SegmentReadService } from '../../segments/segment-read.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { deriveGroupJid } from '../../segments/group-jid.util';
@@ -65,6 +66,7 @@ export class ConversationsService {
     private readonly projects: ProjectsService,
     private readonly zappfyHttp: ZappfyHttpClient,
     private readonly contactEnricher: ZappfyContactEnricherService,
+    private readonly llm: LlmService,
     @InjectQueue(AVATAR_HYDRATION_QUEUE)
     private readonly avatarQueue: Queue<AvatarHydrationJob>,
   ) {}
@@ -756,6 +758,69 @@ export class ConversationsService {
   async getStatusCounts(organizationId: string, access: ChannelAccess = 'ALL') {
     const accessibleIds = access === 'ALL' ? undefined : [...access];
     return this.repository.countByStatus(organizationId, accessibleIds);
+  }
+
+  /**
+   * Resumo inteligente da conversa via IA (Sakana). Monta um transcript das
+   * últimas mensagens e pede um resumo objetivo, no contexto previdenciário.
+   * Se a chave de IA não estiver configurada, devolve erro amigável.
+   */
+  async summarize(
+    conversationId: string,
+    organizationId: string,
+    access: ChannelAccess = 'ALL',
+  ): Promise<{ summary: string }> {
+    await this.findOne(conversationId, organizationId, access);
+
+    const messages = await this.prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      take: 120,
+      select: { direction: true, type: true, content: true },
+    });
+
+    if (messages.length === 0) {
+      return { summary: 'Ainda não há mensagens nesta conversa para resumir.' };
+    }
+
+    const transcript = messages
+      .map((m) => {
+        const who = m.direction === 'INBOUND' ? 'Cliente' : 'Atendente';
+        const text = (m.content as any)?.text?.trim();
+        return `${who}: ${text || `[${String(m.type).toLowerCase()}]`}`;
+      })
+      .join('\n');
+
+    try {
+      const res = await this.llm.complete({
+        modelId: 'sakana/fugu-ultra-20260615',
+        temperature: 0.3,
+        maxTokens: 600,
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Você é um assistente de um escritório de advocacia previdenciária. ' +
+              'Resuma a conversa de atendimento de forma objetiva, em português e em tópicos curtos: ' +
+              '1) o que o cliente quer / benefício mencionado (aposentadoria, BPC-LOAS, auxílio-doença, salário-maternidade, etc); ' +
+              '2) dados e documentos já coletados; 3) situação atual; 4) próximo passo recomendado. ' +
+              'Não invente informações que não estejam na conversa.',
+          },
+          { role: 'user', content: `Conversa:\n\n${transcript}` },
+        ],
+      });
+      const content = res.message?.content;
+      const summary =
+        typeof content === 'string' ? content : JSON.stringify(content ?? '');
+      return { summary: summary.trim() || 'Não foi possível gerar o resumo.' };
+    } catch (err: any) {
+      if (/SAKANA_API_KEY/i.test(err?.message ?? '')) {
+        throw new BadRequestException(
+          'IA ainda não configurada. Adicione a chave de IA no servidor (SAKANA_API_KEY) para gerar resumos.',
+        );
+      }
+      throw err;
+    }
   }
 
   /**

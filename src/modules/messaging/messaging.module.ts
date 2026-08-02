@@ -4,6 +4,7 @@ import { AVATAR_HYDRATION_QUEUE } from '../channel-hub/avatars/avatar-hydration.
 import { ChannelHubModule } from '../channel-hub/channel-hub.module';
 import { RatingsModule } from '../ratings/ratings.module';
 import { AiAgentsModule } from '../ai-agents/ai-agents.module';
+import { LlmModule } from '../ai-agents/llm/llm.module';
 import { WatchdogModule } from '../routing/watchdog/watchdog.module';
 import { SegmentsModule } from '../segments/segments.module';
 import { ProjectsModule } from '../projects/projects.module';
@@ -41,6 +42,7 @@ import { ContactsRepository } from './contacts/contacts.repository';
     forwardRef(() => ChannelHubModule),
     RatingsModule,
     AiAgentsModule,
+    LlmModule,
     WatchdogModule,
     SegmentsModule,
     ProjectsModule,

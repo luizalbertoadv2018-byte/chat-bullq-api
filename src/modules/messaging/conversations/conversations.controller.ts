@@ -194,6 +194,16 @@ export class ConversationsController {
     return this.service.getStatusCounts(orgId, access);
   }
 
+  @Post(':id/summary')
+  @ApiOperation({ summary: 'Gera um resumo com IA da conversa' })
+  summarize(
+    @Param('id') id: string,
+    @CurrentOrg('id') orgId: string,
+    @CurrentChannelAccess() access: ChannelAccess,
+  ) {
+    return this.service.summarize(id, orgId, access);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Get conversation details' })
   findOne(
