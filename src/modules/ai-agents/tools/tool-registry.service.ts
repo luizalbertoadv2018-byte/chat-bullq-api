@@ -18,6 +18,7 @@ import { ListarReunioesClienteTool } from './builtin/listar-reunioes-cliente.too
 import { LerTranscricaoReuniaoTool } from './builtin/ler-transcricao-reuniao.tool';
 import { AgendarReuniaoTool } from './builtin/agendar-reuniao.tool';
 import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
+import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
 
 /**
  * Registry of BUILT-IN skills (named "tools" in the code for legacy reasons).
@@ -55,12 +56,17 @@ export class ToolRegistry {
     lerTranscricaoReuniao: LerTranscricaoReuniaoTool,
     agendarReuniao: AgendarReuniaoTool,
     moveRecoveryCard: MoveRecoveryCardTool,
+    enviarDocumentoAssinatura: EnviarDocumentoAssinaturaTool,
   ) {
     this.register(reply, ['ORCHESTRATOR', 'WORKER']);
     this.register(transfer, ['ORCHESTRATOR', 'WORKER']);
     this.register(tag, ['ORCHESTRATOR', 'WORKER']);
-    this.register(listAgents, ['ORCHESTRATOR']);
-    this.register(delegate, ['ORCHESTRATOR']);
+    // Delegação: ORCHESTRATOR e WORKER. Liberar pro WORKER permite o
+    // encadeamento estilo LiderHub (recepção→proposta→fechamento, cada
+    // agente transfere direto pro próximo). Agentes que não instruem
+    // delegação no prompt simplesmente não usam.
+    this.register(listAgents, ['ORCHESTRATOR', 'WORKER']);
+    this.register(delegate, ['ORCHESTRATOR', 'WORKER']);
     this.register(handBack, ['WORKER']);
     // Detalhes oficiais (preço/condições/link) das soluções da org —
     // ORCHESTRATOR e WORKER de vendas usam pra não inventar valor/link.
@@ -98,8 +104,23 @@ export class ToolRegistry {
       this.register(moveRecoveryCard, ['WORKER'], recoveryAgents);
     }
 
+    // ZapSign: envio de documentos p/ assinatura digital (conta do
+    // escritório). Ação sensível/outbound → gate por env ZAPSIGN_AGENT_IDS
+    // (csv). Vazio = liberado p/ todos os ORCHESTRATOR e WORKER (a proteção
+    // real é o token no servidor: sem ZAPSIGN_API_TOKEN a tool responde
+    // "não configurada" e não faz nada).
+    const zapsignAgents = (config.get<string>('ZAPSIGN_AGENT_IDS') ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    this.register(
+      enviarDocumentoAssinatura,
+      ['ORCHESTRATOR', 'WORKER'],
+      zapsignAgents.length > 0 ? zapsignAgents : undefined,
+    );
+
     this.logger.log(
-      `Built-in skills loaded: ${[...this.tools.keys()].join(', ')} (client-ops → ${clientOpsAgents.join(', ')}; recovery → ${recoveryAgents.join(', ') || 'none'})`,
+      `Built-in skills loaded: ${[...this.tools.keys()].join(', ')} (client-ops → ${clientOpsAgents.join(', ')}; recovery → ${recoveryAgents.join(', ') || 'none'}; zapsign → ${zapsignAgents.join(', ') || 'todos'})`,
     );
   }
 

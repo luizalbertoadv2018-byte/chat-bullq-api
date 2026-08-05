@@ -24,6 +24,7 @@ enum AgentStatus {
 enum ChannelType {
   WHATSAPP_OFFICIAL
   WHATSAPP_ZAPPFY
+  WHATSAPP_EVOLUTION
   INSTAGRAM
   GMAIL
 }
@@ -199,6 +200,7 @@ model Organization {
   products      Product[]
   segments      Segment[]
   projects      Project[]
+  knowledgeDocuments KnowledgeDocument[]
 
   @@map("organizations")
 }
@@ -777,6 +779,48 @@ model QuickReply {
   @@map("quick_replies")
 }
 
+// ─── Base de conhecimento (RAG por agente) ───────
+// Documento que alimenta o RAG dos agentes. O texto (colado ou extraído de
+// PDF) é fatiado em chunks, cada chunk vira um vetor em `ai_vector_entries`
+// (owner_type='knowledge', agent_id = cada agente vinculado). A busca por
+// similaridade no run do agente recupera os trechos relevantes.
+model KnowledgeDocument {
+  id             String    @id @default(cuid())
+  organizationId String    @map("organization_id")
+  title          String
+  // 'TEXT' (colado) | 'PDF' (extraído de upload).
+  sourceType     String    @default("TEXT") @map("source_type")
+  // Texto integral (fonte de verdade — re-chunkado a cada reindex).
+  content        String    @db.Text
+  fileName       String?   @map("file_name")
+  // 'INDEXING' | 'READY' | 'FAILED' — estado da indexação no vetor.
+  status         String    @default("READY")
+  chunkCount     Int       @default(0) @map("chunk_count")
+  error          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  agents       KnowledgeDocumentAgent[]
+
+  @@index([organizationId], name: "idx_knowledge_doc_org")
+  @@map("knowledge_documents")
+}
+
+// Vínculo N:N documento ↔ agente (escopo por agente, estilo LiderHub).
+model KnowledgeDocumentAgent {
+  documentId String @map("document_id")
+  agentId    String @map("agent_id")
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  agent    AiAgent           @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, agentId])
+  @@index([agentId], name: "idx_knowledge_doc_agent")
+  @@map("knowledge_document_agents")
+}
+
 // ─── Tags ────────────────────────────────────────
 
 model Tag {
@@ -938,6 +982,15 @@ model AiAgent {
   category     String?
   capabilities String[]    @default([])
 
+  // ─── Roteamento determinístico por palavra-chave ───────────
+  // Se a mensagem do cliente contém alguma destas palavras, a conversa é
+  // roteada DIRETO pra este agent, ANTES do classificador LLM (Fugu) rodar.
+  // Match é case- e acento-insensitive, por palavra inteira. Vazio = agent
+  // não participa do roteamento por keyword (cai no fluxo do classifier).
+  // Uso típico: um agent especialista por assunto (ex: "aposentadoria",
+  // "auxílio-doença", "bpc", "loas" → cada um pro seu worker).
+  triggerKeywords String[] @default([]) @map("trigger_keywords")
+
   // ─── Organograma matricial ágil ────────────────────────────
   // parentAgentId: chefia direta — quem este agent reporta. Null = raiz (CEO/diretoria).
   // department: setor (VENDAS, SUPORTE, CS, CONTABIL, JURIDICO, FINANCEIRO, OPERACOES, ...).
@@ -987,6 +1040,7 @@ model AiAgent {
   pendingActions AiPendingAction[]
   activeOn       Conversation[]    @relation("ActiveAgent")
   skills         AiAgentSkill[]
+  knowledgeDocs  KnowledgeDocumentAgent[]
 
   @@index([organizationId], name: "idx_ai_agent_org")
   @@index([organizationId, kind], name: "idx_ai_agent_org_kind")

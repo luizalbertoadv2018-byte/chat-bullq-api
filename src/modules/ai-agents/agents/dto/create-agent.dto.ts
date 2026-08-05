@@ -53,7 +53,19 @@ export class CreateAgentDto {
   @IsString({ each: true })
   capabilities?: string[];
 
-  @ApiProperty({ example: 'sakana/fugu-ultra-20260615' })
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Palavras-chave que roteiam a conversa DIRETO pra este agent (antes do classificador LLM). Match case- e acento-insensitive, por palavra inteira.',
+    example: ['aposentadoria', 'auxílio-doença', 'bpc', 'loas'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(60, { each: true })
+  triggerKeywords?: string[];
+
+  @ApiProperty({ example: 'claude-opus-4-8' })
   @IsString()
   modelId!: string;
 

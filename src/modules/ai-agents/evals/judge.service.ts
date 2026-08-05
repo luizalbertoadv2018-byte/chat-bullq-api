@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { LlmService } from '../llm/llm.service';
-import { SAKANA_SIMPLE_MODEL } from '../llm/llm.constants';
+import { LLM_SIMPLE_MODEL } from '../llm/llm.constants';
 import { JudgeVerdict } from './types';
 
-const JUDGE_MODEL = SAKANA_SIMPLE_MODEL;
+const JUDGE_MODEL = LLM_SIMPLE_MODEL;
 
 const JUDGE_SYSTEM_PROMPT = `Você é um juiz imparcial que avalia respostas de agents de IA.
 

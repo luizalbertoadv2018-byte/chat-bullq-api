@@ -24,6 +24,7 @@
     "seed": "ts-node prisma/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@nestjs/bullmq": "^11.0.0",
     "@nestjs/common": "^11.1.0",
     "@nestjs/config": "^4.0.0",
@@ -47,6 +48,8 @@
     "passport": "^0.7.0",
     "passport-custom": "^1.1.1",
     "passport-jwt": "^4.0.1",
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.15.0",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.0",
@@ -60,6 +63,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/passport-jwt": "^4.0.1",
+    "@types/pdfkit": "^0.13.0",
     "@types/pg": "^8.20.0",
     "@types/web-push": "^3.6.0",
     "jest": "^30.4.2",
@@ -68,5 +72,15 @@
     "ts-node": "^10.9.0",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.0"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.2": true,
+    "@prisma/engines@6.19.2": true,
+    "prisma@6.19.2": true,
+    "bcrypt@6.0.0": true,
+    "@nestjs/core@11.1.17": true,
+    "@scarf/scarf@1.4.0": true,
+    "msgpackr-extract@3.0.3": true,
+    "unrs-resolver@1.12.2": true
   }
 }

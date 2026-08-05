@@ -28,6 +28,7 @@ import { ConfirmationsModule } from './confirmations/confirmations.module';
 import { ConfirmationExecutorModule } from './confirmations/confirmation-executor.module';
 import { RagModule } from './rag/rag.module';
 import { EvalsModule } from './evals/evals.module';
+import { KnowledgeModule } from '../knowledge/knowledge.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { EvalsModule } from './evals/evals.module';
     ConfirmationExecutorModule,
     RagModule,
     EvalsModule,
+    KnowledgeModule,
   ],
   controllers: [AgentsController, AiCatalogController],
   providers: [

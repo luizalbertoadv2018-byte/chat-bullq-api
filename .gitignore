@@ -39,3 +39,8 @@ temp/
 
 # Local file storage
 uploads/
+
+# Diagnostic/backup scripts (local only — não versionar)
+tmp-*.cjs
+tmp-*.txt
+agents-backup-*.json

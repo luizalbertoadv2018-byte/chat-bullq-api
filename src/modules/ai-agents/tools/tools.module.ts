@@ -17,7 +17,10 @@ import { ListarReunioesClienteTool } from './builtin/listar-reunioes-cliente.too
 import { LerTranscricaoReuniaoTool } from './builtin/ler-transcricao-reuniao.tool';
 import { AgendarReuniaoTool } from './builtin/agendar-reuniao.tool';
 import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
+import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
 import { HoppeClientService } from './client-ops/hoppe-client.service';
+import { ZapSignClientService } from './client-ops/zapsign-client.service';
+import { DocumentPdfService } from './client-ops/document-pdf.service';
 import { GoogleAuthService } from './client-ops/google-auth.service';
 import { GoogleCalendarService } from './client-ops/google-calendar.service';
 import { GoogleDriveService } from './client-ops/google-drive.service';
@@ -56,6 +59,8 @@ import { SalesRecoveryModule } from '../../sales-recovery/sales-recovery.module'
     GoogleDriveService,
     ClickUpClientService,
     N8nClientService,
+    ZapSignClientService,
+    DocumentPdfService,
     GroupNotifyService,
     ConsultarClickUpClienteTool,
     ConsultarN8nClienteTool,
@@ -63,6 +68,7 @@ import { SalesRecoveryModule } from '../../sales-recovery/sales-recovery.module'
     LerTranscricaoReuniaoTool,
     AgendarReuniaoTool,
     MoveRecoveryCardTool,
+    EnviarDocumentoAssinaturaTool,
     ToolRegistry,
     HttpToolExecutorService,
     SqlToolExecutorService,

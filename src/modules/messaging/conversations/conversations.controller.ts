@@ -97,6 +97,13 @@ export class ConversationsController {
     @Query('hoppeId') hoppeId?: string,
     @Query('responsibleUserId') responsibleUserId?: string,
     @Query('projectStatus') projectStatus?: string,
+    @Query('origem') origem?: string,
+    @Query('dateFrom') dateFrom?: string,
+    @Query('dateTo') dateTo?: string,
+    @Query('unanswered') unanswered?: string,
+    @Query('inactive') inactive?: string,
+    @Query('inactiveHours') inactiveHours?: string,
+    @Query('focus') focus?: string,
   ) {
     const archivedScope =
       archived === 'only' || archived === 'any' ? archived : 'exclude';
@@ -126,6 +133,13 @@ export class ConversationsController {
         hoppeId: hoppeId || undefined,
         responsibleUserId: responsibleUserId || undefined,
         projectStatus: projectStatus || undefined,
+        origem: origem || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        unansweredOnly: unanswered === 'true' || unanswered === '1',
+        inactiveOnly: inactive === 'true' || inactive === '1',
+        inactiveHours: inactiveHours ? parseInt(inactiveHours, 10) : undefined,
+        focusMode: focus === 'true' || focus === '1',
       },
       parseInt(page || '1', 10),
       parseInt(limit || '20', 10),

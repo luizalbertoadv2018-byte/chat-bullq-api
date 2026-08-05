@@ -32,6 +32,7 @@ import {
 } from '../prompts/layers/security.layer';
 import type { SecurityRules } from '../prompts/types';
 import { RetrievalService } from '../rag/retrieval.service';
+import { KnowledgeService } from '../../knowledge/knowledge.service';
 import { IntentType } from '../classifier/intent.types';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { sanitizeAssistantText } from './text-guards';
@@ -91,6 +92,7 @@ export class AiAgentRunnerService {
     private readonly agentRouter: AgentRouterService,
     private readonly securityLayer: SecurityLayerService,
     private readonly retrieval: RetrievalService,
+    private readonly knowledge: KnowledgeService,
     private readonly realtime: RealtimeGateway,
     private readonly mediaUrlResolver: MediaUrlResolverService,
     @InjectQueue('memory-extractor')
@@ -991,7 +993,14 @@ export class AiAgentRunnerService {
     };
 
     // 2) RAG retrieval (não cacheable — varia por turno)
+    //    Duas buscas independentes:
+    //     a) MEMÓRIA da conversa (mensagens/fatos/resumos) — escopo
+    //        agente+contato+conversa.
+    //     b) BASE DE CONHECIMENTO do agente (documentos que o operador subiu)
+    //        — escopo só por agente + owner_type='knowledge' (não tem
+    //        contato/conversa, então precisa de query própria).
     let ragPart: { type: 'text'; text: string; cache: false } | null = null;
+    let knowledgePart: { type: 'text'; text: string; cache: false } | null = null;
     if (triggerText && triggerText.length >= 10) {
       try {
         const results = await this.retrieval.retrieve({
@@ -1021,11 +1030,30 @@ export class AiAgentRunnerService {
       } catch (err: any) {
         this.logger.warn(`RAG retrieval failed: ${err?.message ?? err}`);
       }
+
+      try {
+        // Base de conhecimento por agente: full-text search nativa do Postgres
+        // (sem embeddings/pgvector). Escopada só por agente.
+        const kb = await this.knowledge.retrieveForAgent(agentId, triggerText, 3);
+        if (kb.length > 0) {
+          const lines = kb
+            .map((r, i) => `${i + 1}. [${r.title}] ${r.content.slice(0, 700)}`)
+            .join('\n\n');
+          knowledgePart = {
+            type: 'text',
+            text: `═══ Base de conhecimento do escritório ═══\n${lines}\n\nUse estas informações como fonte de verdade para responder dúvidas do cliente. Se a resposta estiver aqui, baseie-se nela. Não invente o que não estiver na base.`,
+            cache: false,
+          };
+        }
+      } catch (err: any) {
+        this.logger.warn(`Knowledge retrieval failed: ${err?.message ?? err}`);
+      }
     }
 
     firstMsg.content = [
       securityPart,
       ...firstMsg.content,
+      ...(knowledgePart ? [knowledgePart] : []),
       ...(ragPart ? [ragPart] : []),
     ];
   }

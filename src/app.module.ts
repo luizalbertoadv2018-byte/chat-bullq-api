@@ -11,6 +11,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { RoutingModule } from './modules/routing/routing.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
+import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { TagsModule } from './modules/tags/tags.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
@@ -57,6 +58,7 @@ import redisConfig from './config/redis.config';
     NotificationsModule,
     RoutingModule,
     QuickRepliesModule,
+    KnowledgeModule,
     TagsModule,
     ChatbotModule,
     DashboardModule,

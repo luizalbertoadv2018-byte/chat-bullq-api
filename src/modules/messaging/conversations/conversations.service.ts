@@ -22,6 +22,7 @@ import {
 import { AgentRouterService } from '../../ai-agents/router/agent-router.service';
 import { AiAgentRunnerService } from '../../ai-agents/runner/agent-runner.service';
 import { LlmService } from '../../ai-agents/llm/llm.service';
+import { LLM_CONVERSATION_MODEL } from '../../ai-agents/llm/llm.constants';
 import { SegmentReadService } from '../../segments/segment-read.service';
 import { ProjectsService } from '../../projects/projects.service';
 import { deriveGroupJid } from '../../segments/group-jid.util';
@@ -261,6 +262,13 @@ export class ConversationsService {
       hoppeId?: string;
       responsibleUserId?: string;
       projectStatus?: string;
+      origem?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      unansweredOnly?: boolean;
+      inactiveOnly?: boolean;
+      inactiveHours?: number;
+      focusMode?: boolean;
     },
     page: number,
     limit: number,
@@ -326,6 +334,13 @@ export class ConversationsService {
       archived: filters.archived,
       unreadOnly: filters.unreadOnly,
       stuckOnly: filters.stuckOnly,
+      origem: filters.origem,
+      dateFrom: filters.dateFrom,
+      dateTo: filters.dateTo,
+      unansweredOnly: filters.unansweredOnly,
+      inactiveOnly: filters.inactiveOnly,
+      inactiveHours: filters.inactiveHours,
+      focusMode: filters.focusMode,
     };
 
     const skip = (page - 1) * limit;
@@ -793,7 +808,7 @@ export class ConversationsService {
 
     try {
       const res = await this.llm.complete({
-        modelId: 'sakana/fugu-ultra-20260615',
+        modelId: LLM_CONVERSATION_MODEL,
         temperature: 0.3,
         maxTokens: 600,
         messages: [
@@ -814,9 +829,9 @@ export class ConversationsService {
         typeof content === 'string' ? content : JSON.stringify(content ?? '');
       return { summary: summary.trim() || 'Não foi possível gerar o resumo.' };
     } catch (err: any) {
-      if (/SAKANA_API_KEY/i.test(err?.message ?? '')) {
+      if (/ANTHROPIC_API_KEY/i.test(err?.message ?? '')) {
         throw new BadRequestException(
-          'IA ainda não configurada. Adicione a chave de IA no servidor (SAKANA_API_KEY) para gerar resumos.',
+          'IA ainda não configurada. Adicione a chave de IA no servidor (ANTHROPIC_API_KEY) para gerar resumos.',
         );
       }
       throw err;

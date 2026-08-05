@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import {
-  SAKANA_CONVERSATION_MODEL,
-  SAKANA_SIMPLE_MODEL,
+  LLM_CONVERSATION_MODEL,
+  LLM_SIMPLE_MODEL,
 } from '../llm/llm.constants';
 
 /**
@@ -61,14 +61,14 @@ export class ModelRouterService {
   selectModel(input: SelectModelInput): string {
     const routing = this.parseRouting(input.modelParams);
 
-    // Sanitiza pra GARANTIR que só modelos Sakana saiam daqui. Agentes
-    // legados podem ter `modelId` antigo (ex.: "claude-sonnet-4-6") que ainda
-    // não foi migrado — nesse caso a síntese cairia no Sakana de conversa em
-    // vez de quebrar no provider. Mesma proteção pra overrides mal preenchidos.
-    const primary = this.toSakana(routing.primary, SAKANA_SIMPLE_MODEL);
-    const escalation = this.toSakana(
+    // Sanitiza pra GARANTIR um ID Claude válido. Agentes legados podem ter
+    // `modelId` antigo do Sakana ("sakana/fugu-ultra-20260615") — mapeamos
+    // pro Claude equivalente em vez de quebrar no provider. Mesma proteção
+    // pra overrides mal preenchidos.
+    const primary = this.toClaude(routing.primary, LLM_SIMPLE_MODEL);
+    const escalation = this.toClaude(
       routing.escalation ?? input.modelId,
-      SAKANA_CONVERSATION_MODEL,
+      LLM_CONVERSATION_MODEL,
     );
 
     if (routing.alwaysPrimary) return primary;
@@ -84,15 +84,15 @@ export class ModelRouterService {
   }
 
   /**
-   * Garante que o modelo é um ID Sakana válido (sakana/* ou fugu*). Qualquer
-   * coisa fora disso (modelId legado de Claude/Anthropic, override quebrado,
-   * vazio) cai no fallback Sakana informado.
+   * Garante um ID Claude válido. IDs `claude-*` passam direto; IDs legados do
+   * Sakana são mapeados (`*ultra*` → conversa, `*fugu*`/`sakana*` → simples);
+   * qualquer outra coisa (override quebrado, vazio) cai no fallback informado.
    */
-  private toSakana(model: string | undefined | null, fallback: string): string {
+  private toClaude(model: string | undefined | null, fallback: string): string {
     const m = (model ?? '').trim();
-    if (m.startsWith('sakana/') || m === 'fugu' || m.startsWith('fugu-')) {
-      return m;
-    }
+    if (m.startsWith('claude-')) return m;
+    if (m.includes('ultra')) return LLM_CONVERSATION_MODEL;
+    if (m.includes('fugu') || m.startsWith('sakana')) return LLM_SIMPLE_MODEL;
     return fallback;
   }
 

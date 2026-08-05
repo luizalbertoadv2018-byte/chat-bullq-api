@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { LlmService } from '../../llm/llm.service';
-import { SAKANA_SIMPLE_MODEL } from '../../llm/llm.constants';
+import { LLM_SIMPLE_MODEL } from '../../llm/llm.constants';
 import {
   ExtractionInput,
   ExtractionResult,
@@ -20,7 +20,7 @@ import {
 @Injectable()
 export class MemoryExtractorService {
   private readonly logger = new Logger(MemoryExtractorService.name);
-  private readonly modelId = SAKANA_SIMPLE_MODEL;
+  private readonly modelId = LLM_SIMPLE_MODEL;
 
   constructor(private readonly llm: LlmService) {}
 

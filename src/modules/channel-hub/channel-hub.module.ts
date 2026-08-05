@@ -9,6 +9,10 @@ import { ZappfyModule } from './adapters/zappfy/zappfy.module';
 import { ZappfyInboundAdapter } from './adapters/zappfy/zappfy.inbound-adapter';
 import { ZappfyOutboundAdapter } from './adapters/zappfy/zappfy.outbound-adapter';
 import { ZappfySyncAdapter } from './adapters/zappfy/zappfy.sync-adapter';
+import { EvolutionModule } from './adapters/evolution/evolution.module';
+import { EvolutionInboundAdapter } from './adapters/evolution/evolution.inbound-adapter';
+import { EvolutionOutboundAdapter } from './adapters/evolution/evolution.outbound-adapter';
+import { EvolutionConnectController } from './adapters/evolution/evolution-connect.controller';
 import { WhatsAppOfficialModule } from './adapters/whatsapp-official/whatsapp-official.module';
 import { WhatsAppOfficialInboundAdapter } from './adapters/whatsapp-official/whatsapp-official.inbound-adapter';
 import { WhatsAppOfficialOutboundAdapter } from './adapters/whatsapp-official/whatsapp-official.outbound-adapter';
@@ -39,12 +43,17 @@ import { WebhookThrottleGuard } from './webhook-throttle.guard';
       { name: CHANNEL_SYNC_QUEUE },
     ),
     ZappfyModule,
+    EvolutionModule,
     WhatsAppOfficialModule,
     InstagramModule,
     GmailModule,
     forwardRef(() => MessagingModule),
   ],
-  controllers: [WebhookGatewayController, ChannelsController],
+  controllers: [
+    WebhookGatewayController,
+    ChannelsController,
+    EvolutionConnectController,
+  ],
   providers: [
     ChannelAdapterRegistry,
     ChannelsService,
@@ -70,6 +79,8 @@ export class ChannelHubModule implements OnModuleInit {
     private readonly zappfyInbound: ZappfyInboundAdapter,
     private readonly zappfyOutbound: ZappfyOutboundAdapter,
     private readonly zappfySync: ZappfySyncAdapter,
+    private readonly evolutionInbound: EvolutionInboundAdapter,
+    private readonly evolutionOutbound: EvolutionOutboundAdapter,
     private readonly waOfficialInbound: WhatsAppOfficialInboundAdapter,
     private readonly waOfficialOutbound: WhatsAppOfficialOutboundAdapter,
     private readonly instagramInbound: InstagramInboundAdapter,
@@ -81,6 +92,7 @@ export class ChannelHubModule implements OnModuleInit {
 
   onModuleInit() {
     this.registry.register(this.zappfyInbound, this.zappfyOutbound);
+    this.registry.register(this.evolutionInbound, this.evolutionOutbound);
     this.registry.register(this.waOfficialInbound, this.waOfficialOutbound);
     this.registry.register(this.instagramInbound, this.instagramOutbound);
     this.registry.register(this.gmailInbound, this.gmailOutbound);

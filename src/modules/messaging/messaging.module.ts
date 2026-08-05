@@ -28,6 +28,10 @@ import { MediaResolverService } from './messages/media-resolver.service';
 import { ContactsController } from './contacts/contacts.controller';
 import { ContactsService } from './contacts/contacts.service';
 import { ContactsRepository } from './contacts/contacts.repository';
+import { SCHEDULED_MESSAGES_QUEUE } from './scheduled-messages/scheduled-messages.constants';
+import { ScheduledMessagesController } from './scheduled-messages/scheduled-messages.controller';
+import { ScheduledMessagesService } from './scheduled-messages/scheduled-messages.service';
+import { ScheduledMessagesProcessor } from './scheduled-messages/scheduled-messages.processor';
 
 @Module({
   imports: [
@@ -35,6 +39,7 @@ import { ContactsRepository } from './contacts/contacts.repository';
       { name: 'inbound-messages' },
       { name: 'outbound-messages' },
       { name: 'chatbot-processor' },
+      { name: SCHEDULED_MESSAGES_QUEUE },
       // Produz aqui (inbox e abertura de conversa); quem consome é o
       // AvatarHydrationProcessor, no ZappfyModule.
       { name: AVATAR_HYDRATION_QUEUE },
@@ -48,7 +53,12 @@ import { ContactsRepository } from './contacts/contacts.repository';
     ProjectsModule,
     SalesRecoveryModule,
   ],
-  controllers: [ConversationsController, MessagesController, ContactsController],
+  controllers: [
+    ConversationsController,
+    MessagesController,
+    ContactsController,
+    ScheduledMessagesController,
+  ],
   providers: [
     IdempotencyService,
     ContactResolverService,
@@ -66,6 +76,8 @@ import { ContactsRepository } from './contacts/contacts.repository';
     MediaResolverService,
     ContactsService,
     ContactsRepository,
+    ScheduledMessagesService,
+    ScheduledMessagesProcessor,
   ],
   exports: [ConversationsService, MessagesService, ConversationFsmService, ContactsService, HistoryImportService, UploadsService],
 })

@@ -40,6 +40,21 @@ export interface InboxFilters {
    * filtro/widget do dashboard.
    */
   stuckOnly?: boolean;
+  /** Filtra por origem do contato (contact.metadata.origem). */
+  origem?: string;
+  /** Período de atividade (lastMessageAt). ISO strings. */
+  dateFrom?: string;
+  dateTo?: string;
+  /** Só conversas cuja ÚLTIMA mensagem é do cliente (INBOUND) — sem resposta. */
+  unansweredOnly?: boolean;
+  /** Só conversas paradas há mais de `inactiveHours` (default 24). */
+  inactiveOnly?: boolean;
+  inactiveHours?: number;
+  /**
+   * Modo Foco: todas as PENDING + as OPEN atribuídas ao usuário atual.
+   * Requer currentUserId; sem ele é no-op.
+   */
+  focusMode?: boolean;
 }
 
 @Injectable()
@@ -135,6 +150,40 @@ export class ConversationsRepository {
       ];
     }
 
+    // Origem do contato (contact.metadata.origem === valor).
+    if (filters.origem) {
+      where.contact = {
+        ...((where.contact as Prisma.ContactWhereInput) ?? {}),
+        metadata: { path: ['origem'], equals: filters.origem },
+      };
+    }
+
+    // Período de atividade + inatividade — ambos operam em lastMessageAt.
+    const lastMsg: Prisma.DateTimeNullableFilter = {};
+    if (filters.dateFrom) lastMsg.gte = new Date(filters.dateFrom);
+    if (filters.dateTo) lastMsg.lte = new Date(filters.dateTo);
+    if (filters.inactiveOnly) {
+      const hours = filters.inactiveHours && filters.inactiveHours > 0
+        ? filters.inactiveHours
+        : 24;
+      const cutoff = new Date(Date.now() - hours * 3_600_000);
+      // Combina com o período: pega o teto mais restritivo.
+      if (!lastMsg.lte || (lastMsg.lte as Date) > cutoff) lastMsg.lte = cutoff;
+    }
+    if (lastMsg.gte || lastMsg.lte) where.lastMessageAt = lastMsg;
+
+    // Modo Foco: PENDING (de todos) + OPEN atribuídas a mim. Usa AND pra não
+    // colidir com o OR de tags/busca.
+    if (filters.focusMode && currentUserId) {
+      (where.AND ??= [] as Prisma.ConversationWhereInput[]);
+      (where.AND as Prisma.ConversationWhereInput[]).push({
+        OR: [
+          { status: ConversationStatus.PENDING },
+          { status: ConversationStatus.OPEN, assignedToId: currentUserId },
+        ],
+      });
+    }
+
     // "Unread only" filter — materialize the exact set of conversation ids
     // that have at least one INBOUND message newer than this user's
     // ConversationRead.lastReadAt (or no read row at all). Doing this in SQL
@@ -189,6 +238,41 @@ export class ConversationsRepository {
         where.id = { in: intersect };
       } else {
         where.id = { in: unreadIds };
+      }
+    }
+
+    // "Sem resposta" — conversas cuja ÚLTIMA mensagem é do cliente (INBOUND),
+    // ou seja, ninguém respondeu ainda. Materializa os ids e intersecta com
+    // o where.id (mesmo padrão do unread).
+    if (filters.unansweredOnly) {
+      const rows = await this.prisma.$queryRaw<{ conversation_id: string }[]>`
+        SELECT c.id AS conversation_id
+        FROM conversations c
+        JOIN LATERAL (
+          SELECT m.direction
+          FROM messages m
+          WHERE m.conversation_id = c.id
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) last ON true
+        WHERE c.organization_id = ${filters.organizationId}
+          AND c.deleted_at IS NULL
+          AND last.direction = 'INBOUND'
+      `;
+      const ids = rows.map((r) => r.conversation_id);
+      if (ids.length === 0) return { conversations: [], total: 0 };
+      if (
+        where.id &&
+        typeof where.id === 'object' &&
+        'in' in where.id &&
+        Array.isArray((where.id as { in: string[] }).in)
+      ) {
+        const existing = (where.id as { in: string[] }).in;
+        const intersect = existing.filter((id) => ids.includes(id));
+        if (intersect.length === 0) return { conversations: [], total: 0 };
+        where.id = { in: intersect };
+      } else {
+        where.id = { in: ids };
       }
     }
 

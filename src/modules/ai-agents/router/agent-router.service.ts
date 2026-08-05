@@ -78,6 +78,31 @@ export class AgentRouterService {
       }
     }
 
+    // 1.5. Atalho determinístico por palavra-chave. Se a mensagem casa com
+    //      as triggerKeywords de algum agent ativo da org, roteia DIRETO
+    //      pra ele — sem gastar chamada de LLM no classifier. Match mais
+    //      específico (keyword mais longa) vence. Grátis, instantâneo,
+    //      previsível — ideal pra "assunto X → especialista X".
+    const keywordMatch = await this.matchByKeyword(
+      conversation.organizationId,
+      latestMessageText,
+    );
+    if (keywordMatch) {
+      this.logger.log({
+        msg: 'agent_selected_via_keyword',
+        keyword: keywordMatch.keyword,
+        agentName: keywordMatch.agentName,
+      });
+      return {
+        agentId: keywordMatch.agentId,
+        agentName: keywordMatch.agentName,
+        classifiedIntent: null,
+        classifierConfidence: null,
+        skippedOrchestrator: true,
+        classifierCostUsd: 0,
+      };
+    }
+
     // 2. Carrega threshold da org
     const org = await this.prisma.organization.findUnique({
       where: { id: conversation.organizationId },
@@ -150,6 +175,60 @@ export class AgentRouterService {
       fallback.classifierCostUsd = classification.costUsd;
     }
     return fallback;
+  }
+
+  /**
+   * Procura um agent ativo da org cuja palavra-chave apareça na mensagem.
+   * Retorna null se nenhum casar. Em empate, a keyword mais LONGA vence
+   * (mais específica: "auxílio-doença" > "auxílio"). Match é case- e
+   * acento-insensitive e por palavra inteira — "loas" não casa dentro de
+   * "loasted", mas casa em "quero o LOAS".
+   */
+  private async matchByKeyword(
+    organizationId: string,
+    messageText: string,
+  ): Promise<{ agentId: string; agentName: string; keyword: string } | null> {
+    const haystack = normalizeForMatch(messageText);
+    if (!haystack) return null;
+
+    const agents = await this.prisma.aiAgent.findMany({
+      where: {
+        organizationId,
+        isActive: true,
+        deletedAt: null,
+        // Postgres: pelo menos uma keyword cadastrada.
+        NOT: { triggerKeywords: { isEmpty: true } },
+      },
+      select: { id: true, name: true, triggerKeywords: true },
+      orderBy: { createdAt: 'asc' }, // desempate estável entre agents.
+    });
+
+    let best: {
+      agentId: string;
+      agentName: string;
+      keyword: string;
+      length: number;
+    } | null = null;
+
+    for (const agent of agents) {
+      for (const raw of agent.triggerKeywords) {
+        const kw = normalizeForMatch(raw);
+        if (!kw) continue;
+        if (!matchesWholeWord(haystack, kw)) continue;
+        if (!best || kw.length > best.length) {
+          best = {
+            agentId: agent.id,
+            agentName: agent.name,
+            keyword: raw,
+            length: kw.length,
+          };
+        }
+      }
+    }
+
+    return best
+      ? { agentId: best.agentId, agentName: best.agentName, keyword: best.keyword }
+      : null;
   }
 
   private async fallbackToOrchestrator(
@@ -327,4 +406,34 @@ export class AgentRouterService {
     const [h, m] = hhmm.split(':').map((v) => parseInt(v, 10));
     return (h || 0) * 60 + (m || 0);
   }
+}
+
+// ─── helpers de matching por palavra-chave ───────────────────────────
+
+/**
+ * Normaliza texto pra comparação: minúsculas, sem acentos, colapsa
+ * whitespace. "Auxílio-Doença" → "auxilio-doenca".
+ */
+function normalizeForMatch(text: string): string {
+  return (text || '')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '') // remove acentos (á→a, ç→c, ã→a)
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Retorna true se `keyword` aparece em `haystack` delimitada por borda de
+ * "palavra". Fronteira = início/fim da string ou qualquer caractere que
+ * não seja letra/número (espaço, hífen, pontuação). Ambos já normalizados.
+ * Escapa metacaracteres de regex pra keyword conter "." "+" etc.
+ */
+function matchesWholeWord(haystack: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // \p{L}\p{N} exigiria flag 'u'; como já removemos acentos e baixamos
+  // caixa, [a-z0-9] cobre o texto normalizado. Bordas: (^|não-alfanum) e
+  // (não-alfanum|$).
+  const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`);
+  return re.test(haystack);
 }

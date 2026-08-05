@@ -26,6 +26,7 @@ export class AgentsService {
         kind: dto.kind ?? 'WORKER',
         category: dto.category,
         capabilities: dto.capabilities ?? [],
+        triggerKeywords: dto.triggerKeywords ?? [],
         modelId: dto.modelId,
         modelParams: dto.modelParams as object | undefined,
         systemPrompt: dto.systemPrompt,
