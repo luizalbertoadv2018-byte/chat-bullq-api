@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsEnum, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsEnum, MaxLength, ValidateIf } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ConversationStatus } from '@prisma/client';
 
@@ -13,10 +13,13 @@ export class UpdateConversationDto {
   @IsString()
   assignedToId?: string;
 
-  @ApiPropertyOptional()
+  // Aceita string (id do departamento) ou null (limpar). O front manda
+  // `departmentId` — NÃO `department` (esse era o bug do 400).
+  @ApiPropertyOptional({ nullable: true })
   @IsOptional()
+  @ValidateIf((_, v) => v !== null)
   @IsString()
-  departmentId?: string;
+  departmentId?: string | null;
 
   /** Apelido interno da conversa — só nós vemos, o cliente não. */
   @ApiPropertyOptional()

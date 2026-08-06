@@ -824,6 +824,7 @@ export class MessagesService {
     limit: number,
     access: ChannelAccess = 'ALL',
     mediaOnly = false,
+    linksOnly = false,
   ) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -834,7 +835,7 @@ export class MessagesService {
     }
     this.channelAccess.assertChannelAccess(access, conversation.channelId);
 
-    // Galeria "Arquivos": só mídias enviadas/recebidas na conversa.
+    // Galeria "Arquivos": só mídias enviadas/recebidas. "Links": só textos com URL.
     const types = mediaOnly ? MEDIA_MESSAGE_TYPES : undefined;
 
     const skip = (page - 1) * limit;
@@ -843,8 +844,8 @@ export class MessagesService {
     // caminho de conversa única.
     const siblingIds = await this.segmentRead.groupSiblingIds(conversationId);
     const { messages, total } = siblingIds
-      ? await this.repository.findByConversationsUnioned(siblingIds, skip, limit, types)
-      : await this.repository.findByConversation(conversationId, skip, limit, types);
+      ? await this.repository.findByConversationsUnioned(siblingIds, skip, limit, types, linksOnly)
+      : await this.repository.findByConversation(conversationId, skip, limit, types, linksOnly);
 
     return {
       messages,

@@ -430,14 +430,22 @@ export class ConversationsService {
 
     if (dto.assignedToId) {
       await this.fsm.assign(id, dto.assignedToId, actorId);
+    } else if (dto.assignedToId === null) {
+      // Desatribuir (o front manda assignedToId=null). Sem isso, "Remover
+      // atribuição" era um no-op silencioso (mostrava sucesso mas não removia).
+      await this.repository.update(id, { assignedTo: { disconnect: true } });
     }
 
     if (dto.status && dto.status !== conversation.status) {
       await this.fsm.transition(id, dto.status, actorId);
     }
 
-    if (dto.departmentId) {
-      await this.repository.update(id, { department: { connect: { id: dto.departmentId } } });
+    if (dto.departmentId !== undefined) {
+      await this.repository.update(id, {
+        department: dto.departmentId
+          ? { connect: { id: dto.departmentId } }
+          : { disconnect: true },
+      });
     }
 
     if (dto.subject !== undefined) {

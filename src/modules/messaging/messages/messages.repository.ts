@@ -15,9 +15,17 @@ export class MessagesRepository {
     skip: number,
     take: number,
     types?: MessageContentType[],
+    linksOnly?: boolean,
   ) {
     const where: Prisma.MessageWhereInput = { conversationId };
-    if (types?.length) where.type = { in: types };
+    if (linksOnly) {
+      // Só mensagens de texto que contêm um link. O front extrai/deduplica
+      // as URLs de `content.text`.
+      where.type = MessageContentType.TEXT;
+      where.content = { path: ['text'], string_contains: 'http' };
+    } else if (types?.length) {
+      where.type = { in: types };
+    }
     const [messages, total] = await this.prisma.$transaction([
       this.prisma.message.findMany({
         where,
@@ -47,13 +55,16 @@ export class MessagesRepository {
     skip: number,
     take: number,
     types?: MessageContentType[],
+    linksOnly?: boolean,
   ) {
     const ids = Prisma.join(conversationIds);
-    // Filtro opcional por tipo (galeria de arquivos). `type::text IN (...)`
-    // evita ter de castar cada valor pro enum "MessageContentType".
-    const typeCond = types?.length
-      ? Prisma.sql`AND type::text IN (${Prisma.join(types)})`
-      : Prisma.empty;
+    // Filtro opcional. Links = TEXT com URL em content.text; senão filtra por
+    // tipo (galeria). `type::text IN (...)` evita castar cada valor pro enum.
+    const typeCond = linksOnly
+      ? Prisma.sql`AND type = 'TEXT' AND content->>'text' ~* 'https?://'`
+      : types?.length
+        ? Prisma.sql`AND type::text IN (${Prisma.join(types)})`
+        : Prisma.empty;
 
     const [pageRows, countRows] = await this.prisma.$transaction([
       this.prisma.$queryRaw<{ id: string }[]>`

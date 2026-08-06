@@ -162,6 +162,11 @@ export class MessagesController {
     required: false,
     description: 'Se "true", retorna só mídias (imagem/vídeo/áudio/documento/sticker) — galeria de arquivos.',
   })
+  @ApiQuery({
+    name: 'linksOnly',
+    required: false,
+    description: 'Se "true", retorna só mensagens de texto que contêm links (http/https).',
+  })
   findByConversation(
     @Query('conversationId') conversationId: string,
     @CurrentOrg('id') orgId: string,
@@ -169,6 +174,7 @@ export class MessagesController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('mediaOnly') mediaOnly?: string,
+    @Query('linksOnly') linksOnly?: string,
   ) {
     return this.service.findByConversation(
       conversationId,
@@ -177,6 +183,7 @@ export class MessagesController {
       parseInt(limit || '50', 10),
       access,
       mediaOnly === 'true',
+      linksOnly === 'true',
     );
   }
 }

@@ -24,7 +24,7 @@ export class TagsController {
   constructor(private readonly service: TagsService) {}
 
   @Post('conversation/:convId/tag/:tagId')
-  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
+  @Roles(OrgRole.OWNER, OrgRole.ADMIN, OrgRole.AGENT)
   @ApiOperation({ summary: 'Attach tag to conversation' })
   addToConversation(
     @Param('convId') convId: string,
@@ -36,7 +36,7 @@ export class TagsController {
   }
 
   @Delete('conversation/:convId/tag/:tagId')
-  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
+  @Roles(OrgRole.OWNER, OrgRole.ADMIN, OrgRole.AGENT)
   @ApiOperation({ summary: 'Remove tag from conversation' })
   removeFromConversation(
     @Param('convId') convId: string,
@@ -48,7 +48,7 @@ export class TagsController {
   }
 
   @Post('contact/:contactId/tag/:tagId')
-  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
+  @Roles(OrgRole.OWNER, OrgRole.ADMIN, OrgRole.AGENT)
   @ApiOperation({ summary: 'Attach tag to contact' })
   addToContact(
     @Param('contactId') contactId: string,
@@ -60,7 +60,7 @@ export class TagsController {
   }
 
   @Delete('contact/:contactId/tag/:tagId')
-  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
+  @Roles(OrgRole.OWNER, OrgRole.ADMIN, OrgRole.AGENT)
   @ApiOperation({ summary: 'Remove tag from contact' })
   removeFromContact(
     @Param('contactId') contactId: string,
