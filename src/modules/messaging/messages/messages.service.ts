@@ -32,6 +32,15 @@ import { ChannelAdapterRegistry } from '../../channel-hub/channel-adapter.regist
 import { ContactResolverService } from '../pipeline/contact-resolver.service';
 import { ConversationResolverService } from '../pipeline/conversation-resolver.service';
 
+/** Tipos de mensagem que contam como "arquivo" na galeria da conversa. */
+const MEDIA_MESSAGE_TYPES: MessageContentType[] = [
+  MessageContentType.IMAGE,
+  MessageContentType.VIDEO,
+  MessageContentType.AUDIO,
+  MessageContentType.DOCUMENT,
+  MessageContentType.STICKER,
+];
+
 @Injectable()
 export class MessagesService {
   private readonly logger = new Logger(MessagesService.name);
@@ -814,6 +823,7 @@ export class MessagesService {
     page: number,
     limit: number,
     access: ChannelAccess = 'ALL',
+    mediaOnly = false,
   ) {
     const conversation = await this.prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -824,14 +834,17 @@ export class MessagesService {
     }
     this.channelAccess.assertChannelAccess(access, conversation.channelId);
 
+    // Galeria "Arquivos": só mídias enviadas/recebidas na conversa.
+    const types = mediaOnly ? MEDIA_MESSAGE_TYPES : undefined;
+
     const skip = (page - 1) * limit;
     // Grupo de segmento: une as mensagens das conversas-irmãs (mesmo grupo nos
     // outros números), deduplicando por messageid. Conversa normal segue o
     // caminho de conversa única.
     const siblingIds = await this.segmentRead.groupSiblingIds(conversationId);
     const { messages, total } = siblingIds
-      ? await this.repository.findByConversationsUnioned(siblingIds, skip, limit)
-      : await this.repository.findByConversation(conversationId, skip, limit);
+      ? await this.repository.findByConversationsUnioned(siblingIds, skip, limit, types)
+      : await this.repository.findByConversation(conversationId, skip, limit, types);
 
     return {
       messages,

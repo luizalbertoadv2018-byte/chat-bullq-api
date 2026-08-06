@@ -125,8 +125,23 @@ export class InboundMessageProcessor extends WorkerHost {
         return { skipped: true, reason: 'duplicate_claim' };
       }
 
-      const { contactId, isNew: isNewContact } =
-        await this.contactResolver.resolve(organizationId, channelId, message);
+      const {
+        contactId,
+        isNew: isNewContact,
+        blocked: isBlockedContact,
+      } = await this.contactResolver.resolve(organizationId, channelId, message);
+
+      // Contato bloqueado: descarta o inbound por completo — não cria
+      // conversa/mensagem, não emite realtime, não dispara IA. O contato já
+      // foi resolvido (para reaproveitar o find-or-create e refletir mudança
+      // de perfil), mas nada mais acontece até o desbloqueio.
+      if (isBlockedContact) {
+        this.logger.debug(
+          `Inbound dropped — blocked contact ${contactId} (${message.externalMessageId})`,
+        );
+        if (webhookEventId) await this.webhookEvents.markProcessed(webhookEventId);
+        return { skipped: true, reason: 'blocked_contact' };
+      }
 
       if (message.channelType === ChannelType.INSTAGRAM) {
         const [channel, contact] = await Promise.all([

@@ -65,4 +65,11 @@ export class ContactsRepository {
   async softDelete(id: string) {
     return this.prisma.contact.update({ where: { id }, data: { deletedAt: new Date() } });
   }
+
+  async setBlocked(id: string, blocked: boolean) {
+    return this.prisma.contact.update({
+      where: { id },
+      data: { blocked, blockedAt: blocked ? new Date() : null },
+    });
+  }
 }

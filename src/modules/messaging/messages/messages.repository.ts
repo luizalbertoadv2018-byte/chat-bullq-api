@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, MessageContentType } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 
 @Injectable()
@@ -14,10 +14,13 @@ export class MessagesRepository {
     conversationId: string,
     skip: number,
     take: number,
+    types?: MessageContentType[],
   ) {
+    const where: Prisma.MessageWhereInput = { conversationId };
+    if (types?.length) where.type = { in: types };
     const [messages, total] = await this.prisma.$transaction([
       this.prisma.message.findMany({
-        where: { conversationId },
+        where,
         orderBy: { createdAt: 'desc' },
         skip,
         take,
@@ -25,7 +28,7 @@ export class MessagesRepository {
           sender: { select: { id: true, name: true, avatarUrl: true } },
         },
       }),
-      this.prisma.message.count({ where: { conversationId } }),
+      this.prisma.message.count({ where }),
     ]);
     return { messages: messages.reverse(), total };
   }
@@ -43,8 +46,14 @@ export class MessagesRepository {
     conversationIds: string[],
     skip: number,
     take: number,
+    types?: MessageContentType[],
   ) {
     const ids = Prisma.join(conversationIds);
+    // Filtro opcional por tipo (galeria de arquivos). `type::text IN (...)`
+    // evita ter de castar cada valor pro enum "MessageContentType".
+    const typeCond = types?.length
+      ? Prisma.sql`AND type::text IN (${Prisma.join(types)})`
+      : Prisma.empty;
 
     const [pageRows, countRows] = await this.prisma.$transaction([
       this.prisma.$queryRaw<{ id: string }[]>`
@@ -55,7 +64,7 @@ export class MessagesRepository {
                    ORDER BY COALESCE(provider_timestamp, created_at) ASC
                  ) AS rn
           FROM messages
-          WHERE conversation_id IN (${ids})
+          WHERE conversation_id IN (${ids}) ${typeCond}
         )
         SELECT r.id
         FROM ranked r
@@ -68,7 +77,7 @@ export class MessagesRepository {
         SELECT COUNT(*)::bigint AS count FROM (
           SELECT DISTINCT COALESCE(external_id, id) AS k
           FROM messages
-          WHERE conversation_id IN (${ids})
+          WHERE conversation_id IN (${ids}) ${typeCond}
         ) t
       `,
     ]);

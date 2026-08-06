@@ -8,6 +8,8 @@ export interface ResolvedContact {
   contactId: string;
   contactChannelId: string;
   isNew: boolean;
+  /** Contato bloqueado — o processor descarta o inbound sem persistir/IA. */
+  blocked: boolean;
 }
 
 @Injectable()
@@ -41,6 +43,7 @@ export class ContactResolverService {
         contactId: existing.contactId,
         contactChannelId: existing.id,
         isNew: false,
+        blocked: existing.contact.blocked,
       };
     }
 
@@ -65,6 +68,7 @@ export class ContactResolverService {
             contactId: racer.contactId,
             contactChannelId: racer.id,
             isNew: false,
+            blocked: racer.contact.blocked,
           };
         }
 
@@ -105,6 +109,7 @@ export class ContactResolverService {
         contactId: existing.contactId,
         contactChannelId: existing.id,
         isNew: false,
+        blocked: existing.contact.blocked,
       };
     }
 
@@ -120,6 +125,7 @@ export class ContactResolverService {
             contactId: racer.contactId,
             contactChannelId: racer.id,
             isNew: false,
+            blocked: racer.contact.blocked,
           };
         }
 
@@ -172,6 +178,7 @@ export class ContactResolverService {
       contactId: contact.id,
       contactChannelId: contact.channels[0].id,
       isNew: true,
+      blocked: false,
     };
   }
 

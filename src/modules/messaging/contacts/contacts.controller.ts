@@ -39,6 +39,20 @@ export class ContactsController {
     return this.service.update(id, orgId, dto);
   }
 
+  @Patch(':id/block')
+  @ApiOperation({
+    summary: 'Block contact — inbound is dropped (no conversation/message/AI) until unblocked',
+  })
+  block(@Param('id') id: string, @CurrentOrg('id') orgId: string) {
+    return this.service.setBlocked(id, orgId, true);
+  }
+
+  @Patch(':id/unblock')
+  @ApiOperation({ summary: 'Unblock contact — inbound flows normally again' })
+  unblock(@Param('id') id: string, @CurrentOrg('id') orgId: string) {
+    return this.service.setBlocked(id, orgId, false);
+  }
+
   @Delete(':id')
   @Roles(OrgRole.OWNER, OrgRole.ADMIN)
   @ApiOperation({ summary: 'Soft delete contact' })

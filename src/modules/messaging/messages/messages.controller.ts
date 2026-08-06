@@ -157,12 +157,18 @@ export class MessagesController {
   @ApiQuery({ name: 'conversationId', required: true })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({
+    name: 'mediaOnly',
+    required: false,
+    description: 'Se "true", retorna só mídias (imagem/vídeo/áudio/documento/sticker) — galeria de arquivos.',
+  })
   findByConversation(
     @Query('conversationId') conversationId: string,
     @CurrentOrg('id') orgId: string,
     @CurrentChannelAccess() access: ChannelAccess,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('mediaOnly') mediaOnly?: string,
   ) {
     return this.service.findByConversation(
       conversationId,
@@ -170,6 +176,7 @@ export class MessagesController {
       parseInt(page || '1', 10),
       parseInt(limit || '50', 10),
       access,
+      mediaOnly === 'true',
     );
   }
 }

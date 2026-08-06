@@ -38,4 +38,9 @@ export class ContactsService {
     await this.findOne(id, organizationId);
     return this.repository.softDelete(id);
   }
+
+  async setBlocked(id: string, organizationId: string, blocked: boolean) {
+    await this.findOne(id, organizationId);
+    return this.repository.setBlocked(id, blocked);
+  }
 }
