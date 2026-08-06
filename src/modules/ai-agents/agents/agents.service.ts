@@ -8,10 +8,54 @@ import { PrismaService } from '../../../database/prisma.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
 import { AssignAgentChannelDto } from './dto/assign-channel.dto';
+import { TestAgentDto } from './dto/test-agent.dto';
+import { LlmService } from '../llm/llm.service';
+import { LlmMessage } from '../llm/llm.types';
 
 @Injectable()
 export class AgentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly llm: LlmService,
+  ) {}
+
+  /**
+   * Testa o agente: roda o LLM com o systemPrompt do agente (ou o override
+   * enviado, p/ testar edições não salvas) + o histórico de teste. É um teste
+   * SÓ DE PROMPT — não executa ferramentas (tag/contrato/delegação) nem
+   * roteamento entre agentes; serve pra ver como o agente escreve/conduz.
+   */
+  async testAgent(organizationId: string, id: string, dto: TestAgentDto) {
+    const agent = await this.prisma.aiAgent.findFirst({
+      where: { id, organizationId, deletedAt: null },
+      select: { systemPrompt: true, modelId: true, temperature: true, maxTokens: true },
+    });
+    if (!agent) throw new NotFoundException('Agent not found');
+
+    const system = (dto.systemPrompt ?? agent.systemPrompt ?? '').trim();
+    const messages: LlmMessage[] = [
+      { role: 'system', content: system },
+      ...dto.messages.map((m) => ({ role: m.role, content: m.content })),
+    ];
+
+    const res = await this.llm.complete({
+      modelId: agent.modelId,
+      messages,
+      temperature: agent.temperature != null ? Number(agent.temperature) : 0.7,
+      maxTokens: agent.maxTokens ?? 1024,
+    });
+
+    const content = res.message.content;
+    const reply =
+      typeof content === 'string'
+        ? content
+        : content
+            .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+            .map((p) => p.text)
+            .join('\n');
+
+    return { reply, usage: res.usage };
+  }
 
   async create(organizationId: string, dto: CreateAgentDto) {
     if (dto.parentAgentId) {

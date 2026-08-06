@@ -14,6 +14,7 @@ import { OrgRole } from '@prisma/client';
 import { AgentsService } from './agents.service';
 import { CreateAgentDto } from './dto/create-agent.dto';
 import { UpdateAgentDto } from './dto/update-agent.dto';
+import { TestAgentDto } from './dto/test-agent.dto';
 import { AssignAgentChannelDto } from './dto/assign-channel.dto';
 import { CurrentOrg, Roles } from '../../../common/decorators';
 import {
@@ -57,6 +58,19 @@ export class AgentsController {
     @Body() dto: UpdateAgentDto,
   ) {
     return this.service.update(orgId, id, dto);
+  }
+
+  @Post(':id/test')
+  @ApiOperation({
+    summary:
+      'Testa o agente: roda o prompt contra uma mensagem (sem ferramentas nem roteamento). Aceita systemPrompt override p/ testar edições não salvas.',
+  })
+  test(
+    @Param('id') id: string,
+    @CurrentOrg('id') orgId: string,
+    @Body() dto: TestAgentDto,
+  ) {
+    return this.service.testAgent(orgId, id, dto);
   }
 
   @Delete(':id')
