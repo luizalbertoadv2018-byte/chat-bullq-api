@@ -5,7 +5,9 @@ RUN apk add --no-cache openssl
 WORKDIR /app
 ENV NODE_ENV=development
 COPY package.json yarn.lock ./
-RUN corepack enable && yarn install --frozen-lockfile --production=false
+# --network-timeout alto: a VPS às vezes tem rede instável com o registry npm
+# (ESOCKETTIMEDOUT). Dá mais fôlego pro download antes de abortar o build.
+RUN corepack enable && yarn install --frozen-lockfile --production=false --network-timeout 600000
 
 FROM node:20-alpine AS builder
 RUN apk add --no-cache openssl
@@ -23,7 +25,7 @@ ENV NODE_ENV=production
 ENV PORT=3001
 
 COPY package.json yarn.lock ./
-RUN corepack enable && yarn install --frozen-lockfile --production=true && yarn cache clean
+RUN corepack enable && yarn install --frozen-lockfile --production=true --network-timeout 600000 && yarn cache clean
 
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
