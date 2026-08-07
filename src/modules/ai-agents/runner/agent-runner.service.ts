@@ -106,6 +106,16 @@ export class AiAgentRunnerService {
     triggerMessage,
     chainDepth = 0,
   }: RunInput): Promise<void> {
+    // IA nunca responde em grupo — trava dura no ponto de execução. Cobre
+    // todo caminho que chega aqui sem passar pelo shouldHandle (engage
+    // manual, setActiveAgent, auto-chain worker→worker). Sem exceção.
+    if (conversation.isGroup) {
+      this.logger.debug(
+        `Agent run skipped for conv ${conversation.id}: group conversation`,
+      );
+      return;
+    }
+
     // Fase 2: usa o agentRouter (com IntentClassifier) pra escolher o agent.
     // Auto-chains (chainDepth > 0) NÃO classificam de novo — já tem activeAgentId.
     let selection: AgentSelection | null = null;

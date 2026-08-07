@@ -287,6 +287,13 @@ export class AgentRouterService {
     handle: boolean;
     reason?: string;
   }> {
+    // IA nunca responde em grupo. Bloqueio incondicional — nem override
+    // "ON" na conversa/canal fura isso. Curto-circuito antes de qualquer
+    // query: conversa de grupo simplesmente não aciona agente.
+    if (conversation.isGroup) {
+      return { handle: false, reason: 'group-conversation' };
+    }
+
     // Hierarquia de override (mais específico ganha):
     //   conv.aiEnabled (true/false) — força resposta da conversa específica
     //   channel.aiEnabled (true/false) — força no canal inteiro
