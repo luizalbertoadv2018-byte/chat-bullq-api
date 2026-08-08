@@ -2,12 +2,71 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma, TaskStatus } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateTaskDto, UpdateTaskDto, ListTasksQueryDto } from './dto/task.dto';
+import { TaskCalendarService } from './task-calendar.service';
+
+/** Campos que o sync com a agenda precisa ler da tarefa. */
+export interface TaskRecord {
+  id: string;
+  title: string;
+  description: string | null;
+  category: string | null;
+  dueAt: Date | null;
+  calendarEventId: string | null;
+  contact?: { name: string | null } | null;
+}
 
 @Injectable()
 export class TasksService {
   private readonly logger = new Logger(TasksService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly calendar: TaskCalendarService,
+  ) {}
+
+  /**
+   * Reflete a tarefa no Google Agenda (cria/atualiza/remove o evento) e grava
+   * calendarEventId/htmlLink. No-op se a integração estiver desligada. Nunca
+   * lança — falha de agenda não pode quebrar o CRUD da tarefa.
+   */
+  private async syncToCalendar(task: TaskRecord): Promise<TaskRecord> {
+    if (!this.calendar.isEnabled()) return task;
+
+    // Sem prazo: se havia evento, remove e limpa.
+    if (!task.dueAt) {
+      if (task.calendarEventId) {
+        await this.calendar.remove(task.calendarEventId);
+        return this.prisma.task.update({
+          where: { id: task.id },
+          data: { calendarEventId: null, calendarHtmlLink: null },
+          include: this.include,
+        });
+      }
+      return task;
+    }
+
+    const res = await this.calendar.upsert(
+      {
+        title: task.title,
+        description: task.description,
+        category: task.category,
+        dueAt: task.dueAt,
+        contactName: task.contact?.name ?? null,
+      },
+      task.calendarEventId,
+    );
+    if (res) {
+      return this.prisma.task.update({
+        where: { id: task.id },
+        data: {
+          calendarEventId: res.eventId,
+          calendarHtmlLink: res.htmlLink,
+        },
+        include: this.include,
+      });
+    }
+    return task;
+  }
 
   /** Dados de contato/responsável embutidos p/ a UI não precisar de N+1. */
   private readonly include: Prisma.TaskInclude = {
@@ -50,7 +109,7 @@ export class TasksService {
   }
 
   async create(orgId: string, dto: CreateTaskDto, createdById?: string) {
-    return this.prisma.task.create({
+    const task = await this.prisma.task.create({
       data: {
         organizationId: orgId,
         title: dto.title.trim(),
@@ -67,6 +126,7 @@ export class TasksService {
       },
       include: this.include,
     });
+    return this.syncToCalendar(task);
   }
 
   async update(orgId: string, id: string, dto: UpdateTaskDto) {
@@ -93,15 +153,19 @@ export class TasksService {
       data.completedAt = dto.status === TaskStatus.DONE ? new Date() : null;
     }
 
-    return this.prisma.task.update({
+    const task = await this.prisma.task.update({
       where: { id },
       data,
       include: this.include,
     });
+    return this.syncToCalendar(task);
   }
 
   async remove(orgId: string, id: string) {
-    await this.findOne(orgId, id);
+    const existing = await this.findOne(orgId, id);
+    if (existing.calendarEventId) {
+      await this.calendar.remove(existing.calendarEventId);
+    }
     await this.prisma.task.update({
       where: { id },
       data: { deletedAt: new Date() },
