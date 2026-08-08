@@ -14,6 +14,12 @@
 /** Modelo barato para tarefas de fundo. */
 export const LLM_SIMPLE_MODEL = 'gpt-4o-mini';
 
-/** Modelo forte para a resposta final ao cliente. */
-export const LLM_CONVERSATION_MODEL = 'gpt-4o';
-// (restart trigger: migrado p/ OpenAI 2026-08-06)
+/**
+ * Modelo da resposta final ao cliente. Rebaixado de 'gpt-4o' p/ 'gpt-4o-mini'
+ * em 2026-08-07: o gpt-4o custava ~R$20 numa conversa longa (síntese de todo
+ * WORKER escalava pro modelo caro a cada turno). Com mini, mesma conversa
+ * ~R$1,25 (~16x mais barato). Pra recuperar qualidade sem voltar ao 4o, dá
+ * pra apontar aqui p/ 'gpt-4.1-mini' (~6x vs 4o, melhor em tools/instrução).
+ */
+export const LLM_CONVERSATION_MODEL = 'gpt-4o-mini';
+// (restart trigger: migrado p/ OpenAI 2026-08-06; barateado 2026-08-07)

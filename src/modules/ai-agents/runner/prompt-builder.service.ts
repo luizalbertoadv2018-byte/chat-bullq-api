@@ -36,6 +36,16 @@ export interface PromptContext {
   mediaUrls?: Map<string, { url: string; mimeType?: string }>;
 }
 
+/**
+ * Quantas imagens mais recentes do histórico continuam indo como image block
+ * (vision) — as anteriores viram um marcador de texto. Motivo (corte de custo
+ * 2026-08-07): uma imagem é RE-ENVIADA e re-cobrada a cada turno; numa conversa
+ * com muitas fotos de documento isso multiplica o custo. As do turno atual são
+ * o que importa pra "enxergar" agora; as antigas o agente já processou. 3 cobre
+ * um envio de frente+verso+extra sem arrastar todo o histórico visual.
+ */
+const KEEP_RECENT_IMAGES = 3;
+
 /** Tipos de imagem enviados ao provider com suporte a vision. */
 const VISION_MIMES = new Set([
   'image/jpeg',
@@ -489,10 +499,18 @@ export class PromptBuilderService {
     // Mensagens type=IMAGE viram image block (vision) quando temos URL
     // pública resolvida em ctx.mediaUrls. Sem URL = fallback pra texto
     // descritivo "[imagem enviada]". Image só vai em role=user (assistant não envia imagens).
+    // Corte de custo: só as N imagens mais recentes vão como vision; as
+    // anteriores viram marcador de texto (ver KEEP_RECENT_IMAGES). O trigger
+    // (mensagem atual) sempre entra — é o que o cliente acabou de mandar.
+    const keepImageIds = this.pickRecentImageIds(
+      ctx.recentMessages,
+      ctx.triggerMessage,
+    );
+
     for (const m of ctx.recentMessages) {
       const role: 'user' | 'assistant' =
         m.direction === 'INBOUND' ? 'user' : 'assistant';
-      const parts = this.extractContentParts(m, ctx.mediaUrls, role);
+      const parts = this.extractContentParts(m, ctx.mediaUrls, role, keepImageIds);
       if (parts.length === 0) continue;
 
       const last = messages[messages.length - 1];
@@ -529,6 +547,7 @@ export class PromptBuilderService {
         ctx.triggerMessage,
         ctx.mediaUrls,
         'user',
+        keepImageIds,
       );
       if (triggerParts.length > 0) {
         const onlyText = triggerParts.every((p) => p.type === 'text');
@@ -559,6 +578,7 @@ export class PromptBuilderService {
     message: Message,
     mediaUrls: Map<string, { url: string; mimeType?: string }> | undefined,
     role: 'user' | 'assistant',
+    keepImageIds?: Set<string>,
   ): LlmContentPart[] {
     const parts: LlmContentPart[] = [];
     const text = this.extractText(message);
@@ -567,9 +587,18 @@ export class PromptBuilderService {
       const media = mediaUrls?.get(message.id);
       const mime = (media?.mimeType ?? '').toLowerCase();
       const supported = !mime || VISION_MIMES.has(mime);
-      if (media?.url && supported) {
+      // Corte de custo: imagem antiga (fora das N mais recentes) não vai como
+      // vision — só um marcador. Evita re-cobrar toda foto do histórico a cada
+      // turno. keepImageIds ausente = comportamento antigo (tudo como vision).
+      const keepAsVision = !keepImageIds || keepImageIds.has(message.id);
+      if (media?.url && supported && keepAsVision) {
         // Vision: anexa image block antes do caption (se houver).
         parts.push({ type: 'image', url: media.url });
+      } else if (media?.url && supported && !keepAsVision) {
+        parts.push({
+          type: 'text',
+          text: '[imagem enviada anteriormente na conversa]',
+        });
       } else {
         // Fallback: URL não resolvida ou mime não suportado para vision.
         // Sinaliza explicitamente pra IA não inventar/improvisar.
@@ -584,6 +613,24 @@ export class PromptBuilderService {
 
     if (text) parts.push({ type: 'text', text });
     return parts;
+  }
+
+  /**
+   * Ids das imagens que continuam indo como vision: as KEEP_RECENT_IMAGES mais
+   * recentes do histórico + a mensagem-gatilho (o que o cliente acabou de
+   * mandar sempre precisa ser visto). recentMessages chega em ordem cronológica
+   * (mais antiga → mais nova), então as últimas do array são as mais recentes.
+   */
+  private pickRecentImageIds(
+    recentMessages: Message[],
+    triggerMessage: Message,
+  ): Set<string> {
+    const imageIds = recentMessages
+      .filter((m) => m.direction === 'INBOUND' && m.type === 'IMAGE')
+      .map((m) => m.id);
+    const keep = new Set(imageIds.slice(-KEEP_RECENT_IMAGES));
+    if (triggerMessage.type === 'IMAGE') keep.add(triggerMessage.id);
+    return keep;
   }
 
   private extractText(message: Message): string {
