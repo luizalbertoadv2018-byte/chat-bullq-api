@@ -94,6 +94,40 @@ export class ContactsService {
     return this.repository.softDelete(id);
   }
 
+  /**
+   * Liberação MANUAL do contato pro Tramitação — para cliente presencial que
+   * não assina contrato pela ZapSign. Dispara a mesma "liberação" da assinatura:
+   * cria o cliente completo no Tramitação e faz backfill das mídias recebidas.
+   */
+  async releaseToTramitacao(id: string, organizationId: string) {
+    const contact = await this.findOne(id, organizationId);
+    if (!this.tramitacao.isEnabled()) {
+      throw new BadRequestException(
+        'Integração com o Tramitação não está configurada no servidor.',
+      );
+    }
+    if (!contact.name && !contact.cpf) {
+      throw new BadRequestException(
+        'Preencha ao menos o nome ou o CPF do contato antes de subir pro Tramitação.',
+      );
+    }
+    const meta = (contact.metadata as Record<string, any>) ?? {};
+    if (meta.tramitacaoReleased) {
+      return { alreadyReleased: true, customerId: meta.tramitacaoCustomerId ?? null };
+    }
+    await this.tramitacaoQueue.add(
+      'sync',
+      { kind: 'release-by-contact', contactId: id, organizationId },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+    return { queued: true };
+  }
+
   async setBlocked(id: string, organizationId: string, blocked: boolean) {
     await this.findOne(id, organizationId);
     return this.repository.setBlocked(id, blocked);

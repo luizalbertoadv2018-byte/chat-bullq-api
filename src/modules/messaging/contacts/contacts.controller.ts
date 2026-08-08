@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Post, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { OrgRole } from '@prisma/client';
 import { ContactsService } from './contacts.service';
@@ -51,6 +51,15 @@ export class ContactsController {
   @ApiOperation({ summary: 'Unblock contact — inbound flows normally again' })
   unblock(@Param('id') id: string, @CurrentOrg('id') orgId: string) {
     return this.service.setBlocked(id, orgId, false);
+  }
+
+  @Post(':id/tramitacao-release')
+  @ApiOperation({
+    summary:
+      'Sobe o contato pro Tramitação manualmente (cliente presencial que não assina pela ZapSign): cria o cliente completo e faz backfill das mídias.',
+  })
+  releaseToTramitacao(@Param('id') id: string, @CurrentOrg('id') orgId: string) {
+    return this.service.releaseToTramitacao(id, orgId);
   }
 
   @Delete(':id')

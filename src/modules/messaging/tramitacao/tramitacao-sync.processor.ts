@@ -19,6 +19,9 @@ import { GmailSendService } from './gmail-send.service';
  *  - `release-by-doc` → assinatura confirmada (webhook ZapSign): cria/atualiza
  *                        o cliente completo, faz backfill das mídias já
  *                        recebidas e libera o fluxo do contato pra frente.
+ *  - `release-by-contact` → liberação MANUAL pelo operador (cliente presencial
+ *                        que não assina pela ZapSign). Mesma liberação, mas
+ *                        achando o contato pelo id.
  * `kind` ausente = `media` (compat. com jobs antigos já enfileirados).
  */
 export type TramitacaoSyncJob =
@@ -31,7 +34,8 @@ export type TramitacaoSyncJob =
       cadastro: TramCadastro;
       docToken: string;
     }
-  | { kind: 'release-by-doc'; docToken: string };
+  | { kind: 'release-by-doc'; docToken: string }
+  | { kind: 'release-by-contact'; contactId: string; organizationId: string };
 
 const EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -75,6 +79,12 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
       return this.processReleaseByDoc(
         data as Extract<TramitacaoSyncJob, { kind: 'release-by-doc' }>,
+      );
+    }
+    if (kind === 'release-by-contact') {
+      if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
+      return this.processReleaseByContact(
+        data as Extract<TramitacaoSyncJob, { kind: 'release-by-contact' }>,
       );
     }
     if (kind === 'cpf') {
@@ -144,14 +154,41 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       );
       return { skipped: 'no-contact-for-doc' };
     }
+    return this.releaseContact(contact, 'assinatura');
+  }
 
+  /** Liberação MANUAL pelo operador (cliente presencial que não assina). */
+  private async processReleaseByContact(data: {
+    contactId: string;
+    organizationId: string;
+  }): Promise<any> {
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: data.contactId },
+    });
+    if (!contact || contact.organizationId !== data.organizationId) {
+      return { skipped: 'contact-not-found' };
+    }
+    return this.releaseContact(contact, 'manual');
+  }
+
+  /**
+   * Núcleo da liberação (usado pela assinatura E pelo botão manual): cria/
+   * atualiza o cliente COMPLETO no Tramitação a partir do cadastro pendente +
+   * campos do contato, marca LIBERADO e faz backfill das mídias já recebidas.
+   * Idempotente: pushCadastro reconcilia por CPF/telefone (não duplica) e o
+   * backfill pula o que já foi enviado.
+   */
+  private async releaseContact(
+    contact: import('@prisma/client').Contact,
+    origem: 'assinatura' | 'manual',
+  ): Promise<any> {
     const meta = (contact.metadata ?? {}) as Record<string, any>;
     const pending = (meta.pendingCadastro ?? {}) as {
       cadastro?: TramCadastro;
       docToken?: string;
     };
 
-    // Monta o cadastro: o que foi coletado no contrato + CPF do contato se faltar.
+    // Monta o cadastro: o coletado no contrato (se houver) + campos do contato.
     const cadastro: TramCadastro = {
       ...(pending.cadastro ?? {}),
       name: pending.cadastro?.name ?? contact.name,
@@ -162,7 +199,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     const customer = await this.tramitacao.pushCadastro(cadastro);
     if (!customer) {
       this.logger.warn(
-        `tramitação(release): pushCadastro falhou p/ contato ${contact.id}`,
+        `tramitação(release/${origem}): pushCadastro falhou p/ contato ${contact.id} (sem nome nem CPF?)`,
       );
       return { skipped: 'push-falhou' };
     }
@@ -176,6 +213,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
           ...restMeta,
           tramitacaoReleased: true,
           tramitacaoReleasedAt: new Date().toISOString(),
+          tramitacaoReleasedBy: origem,
           tramitacaoCustomerId: customer.id,
           tramitacaoCustomerType: 'cliente',
         } as any,
@@ -187,7 +225,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     const backfilled = await this.backfillMedia(contact.id, contact.organizationId);
 
     this.logger.log(
-      `tramitação(release): contato ${contact.id} → cliente ${customer.id}; backfill de ${backfilled} mídia(s)`,
+      `tramitação(release/${origem}): contato ${contact.id} → cliente ${customer.id}; backfill de ${backfilled} mídia(s)`,
     );
     return { released: true, customerId: customer.id, backfilled };
   }
