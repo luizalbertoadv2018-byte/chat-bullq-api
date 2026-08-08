@@ -118,28 +118,32 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
   ) {}
 
   /**
-   * Camada 2 — quando o agente envia um documento (contrato/procuração), ele
-   * já coletou o cadastro completo do cliente (nome, CPF, estado civil,
-   * profissão, endereço...). Aproveitamos esses mesmos dados pra criar/atualizar
-   * o cliente no Tramitação Inteligente, já preenchido. Fire-and-forget: nunca
-   * atrapalha o envio da assinatura. No-op se o Tramitação estiver desligado
-   * (o processor descarta o job).
+   * Camada 2 — quando o agente envia o contrato, ele já coletou o cadastro
+   * completo do cliente (nome, CPF, estado civil, profissão, endereço...).
+   * GUARDAMOS esse cadastro como PENDENTE no contato (junto do docToken da
+   * ZapSign), SEM tocar o Tramitação ainda: nada é criado lá até o cliente
+   * ASSINAR. Quando a ZapSign avisar a assinatura (webhook), o cadastro é
+   * empurrado e os documentos recebidos são espelhados. Assim o Tramitação não
+   * enche de leads que nunca viraram cliente. Fire-and-forget.
    */
-  private pushCadastroToTramitacao(
+  private stashCadastroForSignature(
     input: Record<string, unknown>,
     ctx: ToolContext,
+    docToken: string,
   ): void {
     try {
+      if (!docToken) return;
       const cadastro = this.buildCadastro(input);
       if (!cadastro.name && !cadastro.cpf) return; // sem chave mínima
       void this.tramitacaoQueue
         .add(
           'sync',
           {
-            kind: 'cadastro',
+            kind: 'stash-cadastro',
             organizationId: ctx.organizationId,
             contactId: ctx.contactId,
             cadastro,
+            docToken,
           },
           {
             attempts: 3,
@@ -150,12 +154,12 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
         )
         .catch((err) =>
           this.logger.warn(
-            `tramitação(cadastro) enqueue falhou (run=${ctx.runId}): ${err?.message ?? err}`,
+            `tramitação(stash) enqueue falhou (run=${ctx.runId}): ${err?.message ?? err}`,
           ),
         );
     } catch (err: any) {
       this.logger.warn(
-        `tramitação(cadastro) build falhou (run=${ctx.runId}): ${err?.message ?? err}`,
+        `tramitação(stash) build falhou (run=${ctx.runId}): ${err?.message ?? err}`,
       );
     }
   }
@@ -485,9 +489,9 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
         this.logger.log(
           `zapsign enviarModelo template=${templateId} vars=${data.length} token=${doc.docToken} (run=${ctx.runId})`,
         );
-        // Camada 2: aproveita o cadastro coletado p/ criar/atualizar o cliente
-        // no Tramitação, já preenchido.
-        this.pushCadastroToTramitacao(input, ctx);
+        // Camada 2: guarda o cadastro coletado como pendente (só vai pro
+        // Tramitação quando o cliente assinar).
+        this.stashCadastroForSignature(input, ctx, doc.docToken);
         const linkModelo = doc.signers[0]?.signUrl ?? null;
         return {
           output: {
@@ -589,8 +593,9 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
         `zapsign enviar doc="${nomeDocumento}" token=${doc.docToken} origem=${conteudo ? 'pdf-gerado' : 'url'} (run=${ctx.runId})`,
       );
 
-      // Camada 2: empurra o cadastro do signatário pro Tramitação.
-      this.pushCadastroToTramitacao(input, ctx);
+      // Camada 2: guarda o cadastro do signatário como pendente (vai pro
+      // Tramitação só na assinatura).
+      this.stashCadastroForSignature(input, ctx, doc.docToken);
 
       const link = doc.signers[0]?.signUrl ?? null;
       return {

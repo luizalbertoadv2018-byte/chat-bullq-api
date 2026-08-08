@@ -62,8 +62,16 @@ export class ContactsService {
 
     const updated = await this.repository.update(id, data);
 
-    // CPF novo definido à mão → casa com o cliente do Tramitação (Camada 1).
-    if (cpfChanged && data.cpf && this.tramitacao.isEnabled()) {
+    // CPF novo definido à mão → casa com o cliente do Tramitação (Camada 1),
+    // MAS só se o contato já foi liberado (contrato assinado). Antes disso o
+    // CPF fica guardado e é usado na liberação — não cria nada no Tramitação.
+    const existingMeta = (existing.metadata as Record<string, any>) ?? {};
+    if (
+      cpfChanged &&
+      data.cpf &&
+      this.tramitacao.isEnabled() &&
+      existingMeta.tramitacaoReleased
+    ) {
       await this.tramitacaoQueue
         .add(
           'sync',

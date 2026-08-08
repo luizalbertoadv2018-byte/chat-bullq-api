@@ -1,28 +1,37 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { Processor, WorkerHost, InjectQueue } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaResolverService } from '../messages/media-resolver.service';
 import { TramitacaoService, TramCadastro } from './tramitacao.service';
 import { GmailSendService } from './gmail-send.service';
 
 /**
- * A fila `tramitacao-sync` carrega 3 tipos de trabalho:
- *  - `media`    → espelha um arquivo recebido no cliente (por e-mail);
- *  - `cpf`      → reconcilia o contato com o cliente do Tramitação por CPF
- *                 (Camada 1 — casamento exato, upgrade contato→cliente);
- *  - `cadastro` → empurra um cadastro completo (Camada 2 — dados do ZapSign).
+ * A fila `tramitacao-sync` carrega os tipos de trabalho abaixo. **NADA vai pro
+ * Tramitação antes da assinatura do contrato** — o gatilho de tudo é `release`.
+ *  - `media`          → espelha um arquivo recebido no cliente (por e-mail).
+ *                        Só é enfileirado pra contato JÁ LIBERADO (ou no backfill).
+ *  - `cpf`            → reconcilia o contato com o cliente do Tramitação por CPF
+ *                        (Camada 1). Só pra contato já liberado.
+ *  - `stash-cadastro` → guarda no contato o cadastro coletado no envio do
+ *                        contrato (Camada 2), SEM tocar o Tramitação. Fica
+ *                        pendente até a assinatura.
+ *  - `release-by-doc` → assinatura confirmada (webhook ZapSign): cria/atualiza
+ *                        o cliente completo, faz backfill das mídias já
+ *                        recebidas e libera o fluxo do contato pra frente.
  * `kind` ausente = `media` (compat. com jobs antigos já enfileirados).
  */
 export type TramitacaoSyncJob =
   | { kind?: 'media'; messageId: string; organizationId: string }
   | { kind: 'cpf'; contactId: string; organizationId: string }
   | {
-      kind: 'cadastro';
+      kind: 'stash-cadastro';
       organizationId: string;
-      contactId?: string;
+      contactId: string;
       cadastro: TramCadastro;
-    };
+      docToken: string;
+    }
+  | { kind: 'release-by-doc'; docToken: string };
 
 const EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -45,6 +54,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     private readonly mediaResolver: MediaResolverService,
     private readonly tramitacao: TramitacaoService,
     private readonly gmail: GmailSendService,
+    @InjectQueue('tramitacao-sync') private readonly queue: Queue,
   ) {
     super();
   }
@@ -53,18 +63,173 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     const data = job.data;
     const kind = (data as any).kind ?? 'media';
 
-    // CPF e cadastro só falam com a API do Tramitação (não enviam e-mail).
+    // stash-cadastro só grava no nosso banco (não toca o Tramitação) — roda
+    // mesmo com a integração desligada, pra o cadastro ficar pronto.
+    if (kind === 'stash-cadastro') {
+      return this.processStashCadastro(
+        data as Extract<TramitacaoSyncJob, { kind: 'stash-cadastro' }>,
+      );
+    }
+    // O resto fala com a API do Tramitação.
+    if (kind === 'release-by-doc') {
+      if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
+      return this.processReleaseByDoc(
+        data as Extract<TramitacaoSyncJob, { kind: 'release-by-doc' }>,
+      );
+    }
     if (kind === 'cpf') {
       if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
       return this.processCpf(data as Extract<TramitacaoSyncJob, { kind: 'cpf' }>);
     }
-    if (kind === 'cadastro') {
-      if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
-      return this.processCadastro(
-        data as Extract<TramitacaoSyncJob, { kind: 'cadastro' }>,
-      );
-    }
     return this.processMedia(data as { messageId: string; organizationId: string });
+  }
+
+  /**
+   * Guarda no contato o cadastro coletado quando o agente envia o contrato,
+   * junto do docToken da ZapSign. Fica PENDENTE (não vai pro Tramitação) até a
+   * assinatura ser confirmada. O docToken é a chave que o webhook usa depois
+   * pra achar este contato.
+   */
+  private async processStashCadastro(data: {
+    organizationId: string;
+    contactId: string;
+    cadastro: TramCadastro;
+    docToken: string;
+  }): Promise<any> {
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: data.contactId },
+      select: { id: true, organizationId: true, metadata: true },
+    });
+    if (!contact || contact.organizationId !== data.organizationId) {
+      return { skipped: 'contact-not-found' };
+    }
+    const meta = (contact.metadata ?? {}) as Record<string, any>;
+    await this.prisma.contact.update({
+      where: { id: contact.id },
+      data: {
+        metadata: {
+          ...meta,
+          pendingCadastro: {
+            cadastro: data.cadastro as any,
+            docToken: data.docToken,
+          },
+        } as any,
+      },
+    });
+    this.logger.log(
+      `tramitação(stash): cadastro pendente guardado p/ contato ${contact.id} (doc ${data.docToken})`,
+    );
+    return { stashed: true };
+  }
+
+  /**
+   * Assinatura confirmada. Acha o contato pelo docToken guardado, cria/atualiza
+   * o cliente COMPLETO no Tramitação, faz backfill das mídias já recebidas e
+   * marca o contato como LIBERADO (dali pra frente tudo sincroniza normalmente).
+   */
+  private async processReleaseByDoc(data: { docToken: string }): Promise<any> {
+    // Acha o contato cujo cadastro pendente aponta pra este documento.
+    const contact = await this.prisma.contact.findFirst({
+      where: {
+        deletedAt: null,
+        metadata: {
+          path: ['pendingCadastro', 'docToken'],
+          equals: data.docToken,
+        },
+      },
+    });
+    if (!contact) {
+      this.logger.warn(
+        `tramitação(release): nenhum contato pendente p/ doc ${data.docToken}`,
+      );
+      return { skipped: 'no-contact-for-doc' };
+    }
+
+    const meta = (contact.metadata ?? {}) as Record<string, any>;
+    const pending = (meta.pendingCadastro ?? {}) as {
+      cadastro?: TramCadastro;
+      docToken?: string;
+    };
+
+    // Monta o cadastro: o que foi coletado no contrato + CPF do contato se faltar.
+    const cadastro: TramCadastro = {
+      ...(pending.cadastro ?? {}),
+      name: pending.cadastro?.name ?? contact.name,
+      cpf: pending.cadastro?.cpf ?? contact.cpf,
+      phone: pending.cadastro?.phone ?? contact.phone,
+    };
+
+    const customer = await this.tramitacao.pushCadastro(cadastro);
+    if (!customer) {
+      this.logger.warn(
+        `tramitação(release): pushCadastro falhou p/ contato ${contact.id}`,
+      );
+      return { skipped: 'push-falhou' };
+    }
+
+    // Marca liberado + guarda o cliente casado; remove o pendente.
+    const { pendingCadastro, ...restMeta } = meta;
+    await this.prisma.contact.update({
+      where: { id: contact.id },
+      data: {
+        metadata: {
+          ...restMeta,
+          tramitacaoReleased: true,
+          tramitacaoReleasedAt: new Date().toISOString(),
+          tramitacaoCustomerId: customer.id,
+          tramitacaoCustomerType: 'cliente',
+        } as any,
+      },
+    });
+
+    // Backfill: manda pro Tramitação TODAS as mídias que o cliente já enviou e
+    // que ainda não foram espelhadas.
+    const backfilled = await this.backfillMedia(contact.id, contact.organizationId);
+
+    this.logger.log(
+      `tramitação(release): contato ${contact.id} → cliente ${customer.id}; backfill de ${backfilled} mídia(s)`,
+    );
+    return { released: true, customerId: customer.id, backfilled };
+  }
+
+  /**
+   * Enfileira o espelhamento de todas as mídias inbound do contato ainda não
+   * enviadas ao Tramitação. Reusa o próprio processor (kind media, idempotente
+   * pelo flag tramitacaoSent).
+   */
+  private async backfillMedia(
+    contactId: string,
+    organizationId: string,
+  ): Promise<number> {
+    const medias = await this.prisma.message.findMany({
+      where: {
+        direction: 'INBOUND',
+        type: { in: ['IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT', 'STICKER'] as any },
+        conversation: { contactId, organizationId },
+        NOT: { metadata: { path: ['tramitacaoSent'], equals: true } },
+      },
+      select: { id: true },
+      take: 500,
+    });
+    for (const m of medias) {
+      await this.queue
+        .add(
+          'sync',
+          { kind: 'media', messageId: m.id, organizationId },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 8000 },
+            removeOnComplete: true,
+            removeOnFail: 50,
+          },
+        )
+        .catch((err) =>
+          this.logger.warn(
+            `backfill enqueue falhou p/ msg ${m.id}: ${err?.message ?? err}`,
+          ),
+        );
+    }
+    return medias.length;
   }
 
   /**
@@ -107,47 +272,6 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       `tramitação(cpf): contato ${contact.id} → cliente ${customer.id}`,
     );
     return { reconciled: true, customerId: customer.id };
-  }
-
-  /**
-   * Camada 2 — empurra o cadastro completo (dados do ZapSign) pro Tramitação e
-   * vincula ao contato, se o job trouxe contactId.
-   */
-  private async processCadastro(data: {
-    organizationId: string;
-    contactId?: string;
-    cadastro: TramCadastro;
-  }): Promise<any> {
-    const customer = await this.tramitacao.pushCadastro(data.cadastro);
-    if (!customer) return { skipped: 'cadastro-incompleto' };
-
-    if (data.contactId) {
-      const contact = await this.prisma.contact.findUnique({
-        where: { id: data.contactId },
-      });
-      if (contact && contact.organizationId === data.organizationId) {
-        const meta = (contact.metadata ?? {}) as Record<string, any>;
-        const cpf = (this.cadastroCpf(data.cadastro) ?? contact.cpf) || null;
-        await this.prisma.contact.update({
-          where: { id: contact.id },
-          data: {
-            ...(cpf && !contact.cpf ? { cpf } : {}),
-            metadata: {
-              ...meta,
-              tramitacaoCustomerId: customer.id,
-              tramitacaoCustomerType: 'cliente',
-            } as any,
-          },
-        });
-      }
-    }
-    this.logger.log(`tramitação(cadastro): cliente ${customer.id} atualizado`);
-    return { pushed: true, customerId: customer.id };
-  }
-
-  private cadastroCpf(cad: TramCadastro): string | null {
-    const d = (cad.cpf ?? '').replace(/\D/g, '');
-    return d.length === 11 ? d : null;
   }
 
   private async processMedia(data: {

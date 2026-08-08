@@ -386,7 +386,10 @@ export class InboundMessageProcessor extends WorkerHost {
 
       // Espelha o arquivo no Tramitação Inteligente (e-mail p/ o endereço
       // exclusivo do cliente → arquiva no cadastro). Mesma esteira, paralelo
-      // ao Drive; fire-and-forget; no-op se desligado.
+      // ao Drive; fire-and-forget; no-op se desligado. **Só sincroniza se o
+      // contato já foi LIBERADO** (contrato assinado) — antes disso o arquivo
+      // fica só no Drive/chat, pra não poluir o Tramitação com leads. As mídias
+      // recebidas antes da assinatura são recuperadas no backfill da liberação.
       if (
         !isEcho &&
         direction === MessageDirection.INBOUND &&
@@ -394,22 +397,15 @@ export class InboundMessageProcessor extends WorkerHost {
         this.tramitacao.isEnabled() &&
         this.gmail.isEnabled()
       ) {
-        this.tramitacaoQueue
-          .add(
-            'sync',
-            { messageId: savedMessage.id, organizationId },
-            {
-              attempts: 3,
-              backoff: { type: 'exponential', delay: 8000 },
-              removeOnComplete: true,
-              removeOnFail: 50,
-            },
-          )
-          .catch((err) =>
-            this.logger.warn(
-              `tramitação enqueue falhou p/ msg ${savedMessage.id}: ${err?.message ?? err}`,
-            ),
-          );
+        this.enqueueTramitacaoMediaIfReleased(
+          savedMessage.id,
+          contactId,
+          organizationId,
+        ).catch((err) =>
+          this.logger.warn(
+            `tramitação enqueue falhou p/ msg ${savedMessage.id}: ${err?.message ?? err}`,
+          ),
+        );
       }
 
       // Captura de CPF (Camada 1): se o cliente digitou um CPF válido na
@@ -474,11 +470,40 @@ export class InboundMessageProcessor extends WorkerHost {
     }
   }
 
+  /** Enfileira o espelhamento da mídia no Tramitação SOMENTE se o contato já
+   *  foi liberado (contrato assinado). Antes disso, não sincroniza. */
+  private async enqueueTramitacaoMediaIfReleased(
+    messageId: string,
+    contactId: string,
+    organizationId: string,
+  ): Promise<void> {
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { metadata: true },
+    });
+    const meta = (contact?.metadata ?? {}) as Record<string, any>;
+    if (!meta.tramitacaoReleased) return; // ainda não assinou → não sincroniza
+
+    await this.tramitacaoQueue.add(
+      'sync',
+      { kind: 'media', messageId, organizationId },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 8000 },
+        removeOnComplete: true,
+        removeOnFail: 50,
+      },
+    );
+  }
+
   /**
    * Detecta um CPF válido no texto/legenda da mensagem recebida. Se achar e o
-   * contato ainda não tiver CPF, grava (só dígitos) e — se o Tramitação estiver
-   * ligado — enfileira o casamento por CPF (Camada 1). Não sobrescreve um CPF
-   * já existente: um número diferente pode ser de outra pessoa citada na conversa.
+   * contato ainda não tiver CPF, grava (só dígitos). O CPF fica no cadastro do
+   * contato desde já (é campo do Chat BullQ, não polui nada). O casamento com o
+   * Tramitação (Camada 1) só é disparado se o contato JÁ foi liberado (contrato
+   * assinado) — senão, o CPF fica guardado e é usado na liberação. Não
+   * sobrescreve um CPF já existente: um número diferente pode ser de outra
+   * pessoa citada na conversa.
    */
   private async handleCpfCapture(
     savedMessage: import('@prisma/client').Message,
@@ -497,7 +522,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
     const contact = await this.prisma.contact.findUnique({
       where: { id: contactId },
-      select: { cpf: true },
+      select: { cpf: true, metadata: true },
     });
     if (!contact) return;
     // Já temos esse mesmo CPF — nada a fazer. Já temos OUTRO CPF — não mexe.
@@ -512,7 +537,9 @@ export class InboundMessageProcessor extends WorkerHost {
     });
     this.logger.log(`CPF capturado p/ contato ${contactId} (msg ${savedMessage.id})`);
 
-    if (this.tramitacao.isEnabled()) {
+    // Só reconcilia no Tramitação se já liberado (contrato assinado).
+    const meta = (contact.metadata ?? {}) as Record<string, any>;
+    if (this.tramitacao.isEnabled() && meta.tramitacaoReleased) {
       await this.tramitacaoQueue
         .add(
           'sync',

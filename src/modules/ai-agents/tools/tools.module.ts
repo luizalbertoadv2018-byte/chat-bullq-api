@@ -30,6 +30,7 @@ import { GroupNotifyService } from './client-ops/group-notify.service';
 import { ToolRegistry } from './tool-registry.service';
 import { HttpToolExecutorService } from './http-tool-executor.service';
 import { SqlToolExecutorService } from './sql-tool-executor.service';
+import { ZapSignWebhookController } from './webhooks/zapsign-webhook.controller';
 import { ConfigModule } from '@nestjs/config';
 import { ConfirmationsModule } from '../confirmations/confirmations.module';
 import { SalesRecoveryModule } from '../../sales-recovery/sales-recovery.module';
@@ -48,6 +49,7 @@ import { SalesRecoveryModule } from '../../sales-recovery/sales-recovery.module'
       { name: 'tramitacao-sync' },
     ),
   ],
+  controllers: [ZapSignWebhookController],
   providers: [
     ReplyToConversationTool,
     TransferToHumanTool,
