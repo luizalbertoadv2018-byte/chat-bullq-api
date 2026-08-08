@@ -16,6 +16,7 @@ import { TranscriptionService } from '../messages/transcription.service';
 import { OutboxService } from '../../automations/outbox/outbox.service';
 import { WatchdogService } from '../../routing/watchdog/watchdog.service';
 import { SalesRecoveryService } from '../../sales-recovery/sales-recovery.service';
+import { DriveService } from '../drive/drive.service';
 import {
   AutomationTrigger,
   ChannelType,
@@ -68,6 +69,15 @@ const NON_TRIGGERING_MESSAGE_TYPES: PrismaContentType[] = [
   PrismaContentType.SYSTEM,
 ];
 
+/** Tipos de mensagem que carregam um arquivo pra espelhar no Google Drive. */
+const MEDIA_MESSAGE_TYPES: PrismaContentType[] = [
+  PrismaContentType.IMAGE,
+  PrismaContentType.AUDIO,
+  PrismaContentType.VIDEO,
+  PrismaContentType.DOCUMENT,
+  PrismaContentType.STICKER,
+];
+
 @Processor('inbound-messages', { concurrency: 10 })
 export class InboundMessageProcessor extends WorkerHost {
   private readonly logger = new Logger(InboundMessageProcessor.name);
@@ -98,7 +108,9 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly outbox: OutboxService,
     private readonly watchdog: WatchdogService,
     private readonly salesRecovery: SalesRecoveryService,
+    private readonly drive: DriveService,
     @InjectQueue('chatbot-processor') private readonly chatbotQueue: Queue,
+    @InjectQueue('drive-sync') private readonly driveQueue: Queue,
   ) {
     super();
   }
@@ -337,6 +349,33 @@ export class InboundMessageProcessor extends WorkerHost {
         // Echo de msg nossa que finalmente voltou — cancela timer existente
         // (pode ter sido enviada por outro path que não passou pelo cancel).
         this.watchdog.cancelCheck(conversationId).catch(() => undefined);
+      }
+
+      // Espelha arquivos recebidos do cliente no Google Drive (uma pasta por
+      // cliente). Só mídia inbound; fire-and-forget — NUNCA bloqueia o
+      // pipeline. No-op se a integração estiver desligada (sem credencial).
+      if (
+        !isEcho &&
+        direction === MessageDirection.INBOUND &&
+        MEDIA_MESSAGE_TYPES.includes(savedMessage.type) &&
+        this.drive.isEnabled()
+      ) {
+        this.driveQueue
+          .add(
+            'sync',
+            { messageId: savedMessage.id, organizationId },
+            {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 5000 },
+              removeOnComplete: true,
+              removeOnFail: 50,
+            },
+          )
+          .catch((err) =>
+            this.logger.warn(
+              `drive enqueue falhou p/ msg ${savedMessage.id}: ${err?.message ?? err}`,
+            ),
+          );
       }
 
       // Fire-and-forget AI dispatch. Failures here MUST NOT take down the
