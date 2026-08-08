@@ -1,4 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { ZapSignClientService } from '../client-ops/zapsign-client.service';
 import { DocumentPdfService } from '../client-ops/document-pdf.service';
@@ -112,7 +114,129 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
   constructor(
     private readonly zapsign: ZapSignClientService,
     private readonly pdf: DocumentPdfService,
+    @InjectQueue('tramitacao-sync') private readonly tramitacaoQueue: Queue,
   ) {}
+
+  /**
+   * Camada 2 — quando o agente envia um documento (contrato/procuração), ele
+   * já coletou o cadastro completo do cliente (nome, CPF, estado civil,
+   * profissão, endereço...). Aproveitamos esses mesmos dados pra criar/atualizar
+   * o cliente no Tramitação Inteligente, já preenchido. Fire-and-forget: nunca
+   * atrapalha o envio da assinatura. No-op se o Tramitação estiver desligado
+   * (o processor descarta o job).
+   */
+  private pushCadastroToTramitacao(
+    input: Record<string, unknown>,
+    ctx: ToolContext,
+  ): void {
+    try {
+      const cadastro = this.buildCadastro(input);
+      if (!cadastro.name && !cadastro.cpf) return; // sem chave mínima
+      void this.tramitacaoQueue
+        .add(
+          'sync',
+          {
+            kind: 'cadastro',
+            organizationId: ctx.organizationId,
+            contactId: ctx.contactId,
+            cadastro,
+          },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 8000 },
+            removeOnComplete: true,
+            removeOnFail: 50,
+          },
+        )
+        .catch((err) =>
+          this.logger.warn(
+            `tramitação(cadastro) enqueue falhou (run=${ctx.runId}): ${err?.message ?? err}`,
+          ),
+        );
+    } catch (err: any) {
+      this.logger.warn(
+        `tramitação(cadastro) build falhou (run=${ctx.runId}): ${err?.message ?? err}`,
+      );
+    }
+  }
+
+  /**
+   * Mapeia as `variaveis` do modelo (chaves em português livre, ex.: "Nome
+   * Completo", "Estado Civil", "Endereço") + os dados do signatário para o
+   * cadastro genérico do Tramitação. Casa por palavra-chave sem acento.
+   */
+  private buildCadastro(input: Record<string, unknown>): {
+    name?: string;
+    cpf?: string;
+    email?: string;
+    phone?: string;
+    maritalStatus?: string;
+    profession?: string;
+    rg?: string;
+    birthdate?: string;
+    street?: string;
+    streetNumber?: string;
+    neighborhood?: string;
+    city?: string;
+    state?: string;
+    zipcode?: string;
+  } {
+    const vars =
+      input.variaveis &&
+      typeof input.variaveis === 'object' &&
+      !Array.isArray(input.variaveis)
+        ? (input.variaveis as Record<string, unknown>)
+        : {};
+
+    // Índice normalizado (sem acento, minúsculo) → valor.
+    const lookup = new Map<string, string>();
+    for (const [k, v] of Object.entries(vars)) {
+      const val = v == null ? '' : String(v).trim();
+      if (val) lookup.set(this.normalizeText(k), val);
+    }
+    // Acha o primeiro valor cuja chave contém QUALQUER um dos termos.
+    const pick = (...terms: string[]): string | undefined => {
+      for (const [k, v] of lookup) {
+        if (terms.some((t) => k.includes(t))) return v;
+      }
+      return undefined;
+    };
+    // Variante com predicado — para casos ambíguos (ex.: "estado" da UF NÃO
+    // pode casar "estado civil").
+    const pickBy = (pred: (k: string) => boolean): string | undefined => {
+      for (const [k, v] of lookup) {
+        if (pred(k)) return v;
+      }
+      return undefined;
+    };
+
+    const signerNome = String(input.signatarioNome ?? '').trim() || undefined;
+    const signerEmail = String(input.signatarioEmail ?? '').trim() || undefined;
+    const signerTel = String(input.signatarioTelefone ?? '').trim() || undefined;
+    const signerCpf = String(input.signatarioCpf ?? '').trim() || undefined;
+
+    const cad = {
+      name: pick('nome') ?? signerNome,
+      cpf: pick('cpf') ?? signerCpf,
+      email: pick('email', 'e-mail') ?? signerEmail,
+      phone: pick('telefone', 'celular', 'whatsapp', 'fone') ?? signerTel,
+      maritalStatus: pick('estado civil', 'civil'),
+      profession: pick('profiss', 'ocupac'),
+      rg: pick('rg', 'identidade'),
+      birthdate: pick('nascimento', 'data de nasc'),
+      street: pick('logradouro', 'endereco', 'rua', 'avenida'),
+      streetNumber: pick('numero', 'nº', 'n°'),
+      neighborhood: pick('bairro'),
+      city: pick('cidade', 'municipio'),
+      // "estado" da UF, mas nunca "estado civil".
+      state: pickBy((k) => k === 'uf' || (k.includes('estado') && !k.includes('civil'))),
+      zipcode: pick('cep'),
+    };
+    // Remove chaves undefined pra manter o payload enxuto.
+    return Object.fromEntries(
+      Object.entries(cad).filter(([, v]) => v !== undefined),
+    ) as any;
+  }
 
   /** Extrai os dados do signatário do input (formato ZapSignSignerInput). */
   private readSigner(input: Record<string, unknown>): {
@@ -361,6 +485,9 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
         this.logger.log(
           `zapsign enviarModelo template=${templateId} vars=${data.length} token=${doc.docToken} (run=${ctx.runId})`,
         );
+        // Camada 2: aproveita o cadastro coletado p/ criar/atualizar o cliente
+        // no Tramitação, já preenchido.
+        this.pushCadastroToTramitacao(input, ctx);
         const linkModelo = doc.signers[0]?.signUrl ?? null;
         return {
           output: {
@@ -461,6 +588,9 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
       this.logger.log(
         `zapsign enviar doc="${nomeDocumento}" token=${doc.docToken} origem=${conteudo ? 'pdf-gerado' : 'url'} (run=${ctx.runId})`,
       );
+
+      // Camada 2: empurra o cadastro do signatário pro Tramitação.
+      this.pushCadastroToTramitacao(input, ctx);
 
       const link = doc.signers[0]?.signUrl ?? null;
       return {

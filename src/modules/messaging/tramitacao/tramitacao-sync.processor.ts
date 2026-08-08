@@ -3,13 +3,26 @@ import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../../database/prisma.service';
 import { MediaResolverService } from '../messages/media-resolver.service';
-import { TramitacaoService } from './tramitacao.service';
+import { TramitacaoService, TramCadastro } from './tramitacao.service';
 import { GmailSendService } from './gmail-send.service';
 
-export interface TramitacaoSyncJob {
-  messageId: string;
-  organizationId: string;
-}
+/**
+ * A fila `tramitacao-sync` carrega 3 tipos de trabalho:
+ *  - `media`    → espelha um arquivo recebido no cliente (por e-mail);
+ *  - `cpf`      → reconcilia o contato com o cliente do Tramitação por CPF
+ *                 (Camada 1 — casamento exato, upgrade contato→cliente);
+ *  - `cadastro` → empurra um cadastro completo (Camada 2 — dados do ZapSign).
+ * `kind` ausente = `media` (compat. com jobs antigos já enfileirados).
+ */
+export type TramitacaoSyncJob =
+  | { kind?: 'media'; messageId: string; organizationId: string }
+  | { kind: 'cpf'; contactId: string; organizationId: string }
+  | {
+      kind: 'cadastro';
+      organizationId: string;
+      contactId?: string;
+      cadastro: TramCadastro;
+    };
 
 const EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -37,10 +50,114 @@ export class TramitacaoSyncProcessor extends WorkerHost {
   }
 
   async process(job: Job<TramitacaoSyncJob>): Promise<any> {
+    const data = job.data;
+    const kind = (data as any).kind ?? 'media';
+
+    // CPF e cadastro só falam com a API do Tramitação (não enviam e-mail).
+    if (kind === 'cpf') {
+      if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
+      return this.processCpf(data as Extract<TramitacaoSyncJob, { kind: 'cpf' }>);
+    }
+    if (kind === 'cadastro') {
+      if (!this.tramitacao.isEnabled()) return { skipped: 'tramitacao-disabled' };
+      return this.processCadastro(
+        data as Extract<TramitacaoSyncJob, { kind: 'cadastro' }>,
+      );
+    }
+    return this.processMedia(data as { messageId: string; organizationId: string });
+  }
+
+  /**
+   * Camada 1 — casa o contato com o cliente do Tramitação pelo CPF. Faz o
+   * upgrade contato→cliente sem duplicar e guarda o id casado no contato
+   * (metadata.tramitacaoCustomerId) pra a esteira de mídia reusar.
+   */
+  private async processCpf(data: {
+    contactId: string;
+    organizationId: string;
+  }): Promise<any> {
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: data.contactId },
+    });
+    if (!contact || contact.organizationId !== data.organizationId) {
+      return { skipped: 'contact-not-found' };
+    }
+    if (!contact.cpf) return { skipped: 'sem-cpf' };
+
+    const meta = (contact.metadata ?? {}) as Record<string, any>;
+    const customer = await this.tramitacao.reconcileByCpf({
+      cpf: contact.cpf,
+      name: contact.name,
+      phone: contact.phone,
+      linkedCustomerId: meta.tramitacaoCustomerId ?? null,
+    });
+    if (!customer) return { skipped: 'reconcile-falhou' };
+
+    await this.prisma.contact.update({
+      where: { id: contact.id },
+      data: {
+        metadata: {
+          ...meta,
+          tramitacaoCustomerId: customer.id,
+          tramitacaoCustomerType: 'cliente',
+        } as any,
+      },
+    });
+    this.logger.log(
+      `tramitação(cpf): contato ${contact.id} → cliente ${customer.id}`,
+    );
+    return { reconciled: true, customerId: customer.id };
+  }
+
+  /**
+   * Camada 2 — empurra o cadastro completo (dados do ZapSign) pro Tramitação e
+   * vincula ao contato, se o job trouxe contactId.
+   */
+  private async processCadastro(data: {
+    organizationId: string;
+    contactId?: string;
+    cadastro: TramCadastro;
+  }): Promise<any> {
+    const customer = await this.tramitacao.pushCadastro(data.cadastro);
+    if (!customer) return { skipped: 'cadastro-incompleto' };
+
+    if (data.contactId) {
+      const contact = await this.prisma.contact.findUnique({
+        where: { id: data.contactId },
+      });
+      if (contact && contact.organizationId === data.organizationId) {
+        const meta = (contact.metadata ?? {}) as Record<string, any>;
+        const cpf = (this.cadastroCpf(data.cadastro) ?? contact.cpf) || null;
+        await this.prisma.contact.update({
+          where: { id: contact.id },
+          data: {
+            ...(cpf && !contact.cpf ? { cpf } : {}),
+            metadata: {
+              ...meta,
+              tramitacaoCustomerId: customer.id,
+              tramitacaoCustomerType: 'cliente',
+            } as any,
+          },
+        });
+      }
+    }
+    this.logger.log(`tramitação(cadastro): cliente ${customer.id} atualizado`);
+    return { pushed: true, customerId: customer.id };
+  }
+
+  private cadastroCpf(cad: TramCadastro): string | null {
+    const d = (cad.cpf ?? '').replace(/\D/g, '');
+    return d.length === 11 ? d : null;
+  }
+
+  private async processMedia(data: {
+    messageId: string;
+    organizationId: string;
+  }): Promise<any> {
     if (!this.tramitacao.isEnabled() || !this.gmail.isEnabled()) {
       return { skipped: 'tramitacao-disabled' };
     }
-    const { messageId, organizationId } = job.data;
+    const { messageId, organizationId } = data;
 
     const message = await this.prisma.message.findUnique({
       where: { id: messageId },
@@ -57,11 +174,14 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     const phone = (contact.phone ?? '').trim();
     if (!phone) return { skipped: 'contato-sem-telefone' };
 
-    // 1) acha o cliente pelo telefone; se não achar, cria um contato.
-    let customer = await this.tramitacao.findByPhone(phone);
-    if (!customer) {
-      customer = await this.tramitacao.createContato(contact.name ?? null, phone);
-    }
+    // 1) resolve o cliente: prefere o já casado por CPF (Camada 1); senão
+    //    acha pelo telefone; senão cria um contato.
+    const contactMeta = (contact.metadata ?? {}) as Record<string, any>;
+    const customer = await this.tramitacao.resolveForMedia({
+      linkedCustomerId: contactMeta.tramitacaoCustomerId ?? null,
+      name: contact.name,
+      phone,
+    });
     if (!customer) return { skipped: 'sem-cliente' };
 
     // 2) garante o e-mail exclusivo.

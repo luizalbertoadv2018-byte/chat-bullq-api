@@ -19,6 +19,7 @@ import { SalesRecoveryService } from '../../sales-recovery/sales-recovery.servic
 import { DriveService } from '../drive/drive.service';
 import { TramitacaoService } from '../tramitacao/tramitacao.service';
 import { GmailSendService } from '../tramitacao/gmail-send.service';
+import { extractCpf, onlyDigits } from '../../../common/util/cpf.util';
 import {
   AutomationTrigger,
   ChannelType,
@@ -411,6 +412,18 @@ export class InboundMessageProcessor extends WorkerHost {
           );
       }
 
+      // Captura de CPF (Camada 1): se o cliente digitou um CPF válido na
+      // conversa, grava no cadastro do contato e dispara o casamento exato
+      // com o cliente do Tramitação. Fire-and-forget; independe de mídia.
+      if (!isEcho && direction === MessageDirection.INBOUND) {
+        this.handleCpfCapture(savedMessage, contactId, organizationId).catch(
+          (err) =>
+            this.logger.warn(
+              `captura de CPF falhou p/ contato ${contactId}: ${err?.message ?? err}`,
+            ),
+        );
+      }
+
       // Fire-and-forget AI dispatch. Failures here MUST NOT take down the
       // inbound pipeline — they're logged and the conversation continues
       // working (the human always wins).
@@ -458,6 +471,64 @@ export class InboundMessageProcessor extends WorkerHost {
         .markProcessed(message.externalMessageId, channelId)
         .catch(() => undefined);
       throw err;
+    }
+  }
+
+  /**
+   * Detecta um CPF válido no texto/legenda da mensagem recebida. Se achar e o
+   * contato ainda não tiver CPF, grava (só dígitos) e — se o Tramitação estiver
+   * ligado — enfileira o casamento por CPF (Camada 1). Não sobrescreve um CPF
+   * já existente: um número diferente pode ser de outra pessoa citada na conversa.
+   */
+  private async handleCpfCapture(
+    savedMessage: import('@prisma/client').Message,
+    contactId: string,
+    organizationId: string,
+  ): Promise<void> {
+    const content = (savedMessage.content ?? {}) as Record<string, any>;
+    const body =
+      (typeof content.text === 'string' && content.text) ||
+      (typeof content.caption === 'string' && content.caption) ||
+      '';
+    if (!body) return;
+
+    const cpf = extractCpf(body);
+    if (!cpf) return;
+
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: contactId },
+      select: { cpf: true },
+    });
+    if (!contact) return;
+    // Já temos esse mesmo CPF — nada a fazer. Já temos OUTRO CPF — não mexe.
+    if (contact.cpf) {
+      if (onlyDigits(contact.cpf) === cpf) return;
+      return;
+    }
+
+    await this.prisma.contact.update({
+      where: { id: contactId },
+      data: { cpf },
+    });
+    this.logger.log(`CPF capturado p/ contato ${contactId} (msg ${savedMessage.id})`);
+
+    if (this.tramitacao.isEnabled()) {
+      await this.tramitacaoQueue
+        .add(
+          'sync',
+          { kind: 'cpf', contactId, organizationId },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 8000 },
+            removeOnComplete: true,
+            removeOnFail: 50,
+          },
+        )
+        .catch((err) =>
+          this.logger.warn(
+            `tramitação(cpf) enqueue falhou p/ contato ${contactId}: ${err?.message ?? err}`,
+          ),
+        );
     }
   }
 

@@ -19,6 +19,9 @@ export class ContactsRepository {
         { name: { contains: search, mode: 'insensitive' } },
         { phone: { contains: search } },
         { email: { contains: search, mode: 'insensitive' } },
+        // Busca por CPF: casa tanto o que foi digitado formatado quanto só
+        // os dígitos (o campo guarda só dígitos).
+        { cpf: { contains: search.replace(/\D/g, '') || search } },
       ];
     }
 

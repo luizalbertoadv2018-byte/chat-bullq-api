@@ -453,6 +453,10 @@ model Contact {
   name           String?
   phone          String?
   email          String?
+  /// CPF do contato (só dígitos). Capturado automaticamente quando o cliente
+  /// envia o número na conversa, ou preenchido manualmente. É a chave exata
+  /// que casa o contato com o cliente no Tramitação Inteligente.
+  cpf            String?
   avatarUrl      String?   @map("avatar_url")
   notes          String?
   metadata       Json      @default("{}")
@@ -474,6 +478,7 @@ model Contact {
 
   @@index([organizationId, phone], name: "idx_contact_org_phone")
   @@index([organizationId, email], name: "idx_contact_org_email")
+  @@index([organizationId, cpf], name: "idx_contact_org_cpf")
   @@map("contacts")
 }
 

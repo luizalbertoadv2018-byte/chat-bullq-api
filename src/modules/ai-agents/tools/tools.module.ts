@@ -41,7 +41,12 @@ import { SalesRecoveryModule } from '../../sales-recovery/sales-recovery.module'
     RealtimeModule,
     ConfirmationsModule,
     SalesRecoveryModule,
-    BullModule.registerQueue({ name: 'outbound-messages' }),
+    BullModule.registerQueue(
+      { name: 'outbound-messages' },
+      // Camada 2: o ZapSign tool empurra o cadastro coletado pro Tramitação
+      // por esta fila (consumida pelo TramitacaoSyncProcessor no MessagingModule).
+      { name: 'tramitacao-sync' },
+    ),
   ],
   providers: [
     ReplyToConversationTool,

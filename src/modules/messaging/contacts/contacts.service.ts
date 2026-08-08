@@ -1,10 +1,23 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { ContactsRepository } from './contacts.repository';
 import { UpdateContactDto } from './dto/update-contact.dto';
+import { TramitacaoService } from '../tramitacao/tramitacao.service';
+import { isValidCpf, onlyDigits } from '../../../common/util/cpf.util';
 
 @Injectable()
 export class ContactsService {
-  constructor(private readonly repository: ContactsRepository) {}
+  constructor(
+    private readonly repository: ContactsRepository,
+    private readonly tramitacao: TramitacaoService,
+    @InjectQueue('tramitacao-sync') private readonly tramitacaoQueue: Queue,
+  ) {}
 
   async findAll(organizationId: string, search: string | undefined, page: number, limit: number) {
     const skip = (page - 1) * limit;
@@ -31,7 +44,41 @@ export class ContactsService {
       const current = (existing.metadata as Record<string, any>) ?? {};
       data.metadata = { ...current, ...dto.metadata };
     }
-    return this.repository.update(id, data);
+
+    // CPF: aceita formatado, guarda só os dígitos e valida (recusa número
+    // que não é CPF). String vazia limpa o campo.
+    let cpfChanged = false;
+    if (dto.cpf !== undefined) {
+      const digits = onlyDigits(dto.cpf);
+      if (digits === '') {
+        data.cpf = null as any;
+      } else if (isValidCpf(digits)) {
+        data.cpf = digits;
+        cpfChanged = onlyDigits(existing.cpf) !== digits;
+      } else {
+        throw new BadRequestException('CPF inválido.');
+      }
+    }
+
+    const updated = await this.repository.update(id, data);
+
+    // CPF novo definido à mão → casa com o cliente do Tramitação (Camada 1).
+    if (cpfChanged && data.cpf && this.tramitacao.isEnabled()) {
+      await this.tramitacaoQueue
+        .add(
+          'sync',
+          { kind: 'cpf', contactId: id, organizationId },
+          {
+            attempts: 3,
+            backoff: { type: 'exponential', delay: 8000 },
+            removeOnComplete: true,
+            removeOnFail: 50,
+          },
+        )
+        .catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async remove(id: string, organizationId: string) {
