@@ -219,14 +219,21 @@ export class TramitacaoService {
     return true;
   }
 
-  /** Cria um cliente COMPLETO (customer_type: cliente) com os campos dados. */
+  /**
+   * Cria um registro no Tramitação com os campos dados. **Só cria como
+   * "cliente" se houver CPF** — a API do Tramitação exige CPF pro tipo
+   * "cliente" (retorna 422 sem ele). Sem CPF, cria como "contato" (que não
+   * exige) e o upgrade contato→cliente acontece depois, quando o CPF chegar.
+   */
   async createCliente(fields: Record<string, unknown>): Promise<TramCustomer | null> {
+    const customerType =
+      (fields.customer_type as string) || (fields.cpf_cnpj ? 'cliente' : 'contato');
     const { status, data } = await this.api('POST', '/clientes', {
-      customer: { customer_type: 'cliente', ...fields },
+      customer: { ...fields, customer_type: customerType },
     });
     const id = data && (data.customer ? data.customer.id : data.id);
     if (status >= 300 || !id) {
-      this.logger.warn(`Tramitação: criar cliente falhou (${status})`);
+      this.logger.warn(`Tramitação: criar registro falhou (${status})`);
       return null;
     }
     const email = await this.ensureEmail(id);
