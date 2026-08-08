@@ -239,17 +239,23 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     contactId: string,
     organizationId: string,
   ): Promise<number> {
+    // Busca TODAS as mídias inbound do contato e filtra o "já enviado" no
+    // código. NÃO usar `NOT { path:['tramitacaoSent'], equals:true }` na query:
+    // no Postgres, mensagens sem essa chave (o caso normal) têm o path = NULL,
+    // e `NOT (NULL = true)` = NULL → a linha é EXCLUÍDA. Isso zerava o backfill.
     const medias = await this.prisma.message.findMany({
       where: {
         direction: 'INBOUND',
         type: { in: ['IMAGE', 'AUDIO', 'VIDEO', 'DOCUMENT', 'STICKER'] as any },
         conversation: { contactId, organizationId },
-        NOT: { metadata: { path: ['tramitacaoSent'], equals: true } },
       },
-      select: { id: true },
-      take: 500,
+      select: { id: true, metadata: true },
+      take: 1000,
     });
+    let enfileiradas = 0;
     for (const m of medias) {
+      const meta = (m.metadata ?? {}) as Record<string, any>;
+      if (meta.tramitacaoSent === true) continue; // já espelhado
       await this.queue
         .add(
           'sync',
@@ -261,13 +267,16 @@ export class TramitacaoSyncProcessor extends WorkerHost {
             removeOnFail: 50,
           },
         )
+        .then(() => {
+          enfileiradas++;
+        })
         .catch((err) =>
           this.logger.warn(
             `backfill enqueue falhou p/ msg ${m.id}: ${err?.message ?? err}`,
           ),
         );
     }
-    return medias.length;
+    return enfileiradas;
   }
 
   /**

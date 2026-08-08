@@ -111,10 +111,10 @@ export class ContactsService {
         'Preencha ao menos o nome ou o CPF do contato antes de subir pro Tramitação.',
       );
     }
+    // Enfileira SEMPRE — a liberação é idempotente (reconcilia o cliente sem
+    // duplicar e o backfill pula o que já foi enviado). Reexecutar num contato
+    // já liberado serve pra reenviar documentos que tenham ficado pra trás.
     const meta = (contact.metadata as Record<string, any>) ?? {};
-    if (meta.tramitacaoReleased) {
-      return { alreadyReleased: true, customerId: meta.tramitacaoCustomerId ?? null };
-    }
     await this.tramitacaoQueue.add(
       'sync',
       { kind: 'release-by-contact', contactId: id, organizationId },
@@ -125,7 +125,7 @@ export class ContactsService {
         removeOnFail: 50,
       },
     );
-    return { queued: true };
+    return { queued: true, alreadyReleased: !!meta.tramitacaoReleased };
   }
 
   async setBlocked(id: string, organizationId: string, blocked: boolean) {
