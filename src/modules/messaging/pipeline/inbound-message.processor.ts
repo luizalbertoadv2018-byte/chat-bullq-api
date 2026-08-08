@@ -17,6 +17,8 @@ import { OutboxService } from '../../automations/outbox/outbox.service';
 import { WatchdogService } from '../../routing/watchdog/watchdog.service';
 import { SalesRecoveryService } from '../../sales-recovery/sales-recovery.service';
 import { DriveService } from '../drive/drive.service';
+import { TramitacaoService } from '../tramitacao/tramitacao.service';
+import { GmailSendService } from '../tramitacao/gmail-send.service';
 import {
   AutomationTrigger,
   ChannelType,
@@ -109,8 +111,11 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly watchdog: WatchdogService,
     private readonly salesRecovery: SalesRecoveryService,
     private readonly drive: DriveService,
+    private readonly tramitacao: TramitacaoService,
+    private readonly gmail: GmailSendService,
     @InjectQueue('chatbot-processor') private readonly chatbotQueue: Queue,
     @InjectQueue('drive-sync') private readonly driveQueue: Queue,
+    @InjectQueue('tramitacao-sync') private readonly tramitacaoQueue: Queue,
   ) {
     super();
   }
@@ -374,6 +379,34 @@ export class InboundMessageProcessor extends WorkerHost {
           .catch((err) =>
             this.logger.warn(
               `drive enqueue falhou p/ msg ${savedMessage.id}: ${err?.message ?? err}`,
+            ),
+          );
+      }
+
+      // Espelha o arquivo no Tramitação Inteligente (e-mail p/ o endereço
+      // exclusivo do cliente → arquiva no cadastro). Mesma esteira, paralelo
+      // ao Drive; fire-and-forget; no-op se desligado.
+      if (
+        !isEcho &&
+        direction === MessageDirection.INBOUND &&
+        MEDIA_MESSAGE_TYPES.includes(savedMessage.type) &&
+        this.tramitacao.isEnabled() &&
+        this.gmail.isEnabled()
+      ) {
+        this.tramitacaoQueue
+          .add(
+            'sync',
+            { messageId: savedMessage.id, organizationId },
+            {
+              attempts: 3,
+              backoff: { type: 'exponential', delay: 8000 },
+              removeOnComplete: true,
+              removeOnFail: 50,
+            },
+          )
+          .catch((err) =>
+            this.logger.warn(
+              `tramitação enqueue falhou p/ msg ${savedMessage.id}: ${err?.message ?? err}`,
             ),
           );
       }

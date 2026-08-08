@@ -27,6 +27,9 @@ import { UploadsService } from './messages/uploads.service';
 import { MediaResolverService } from './messages/media-resolver.service';
 import { DriveService } from './drive/drive.service';
 import { DriveSyncProcessor } from './drive/drive-sync.processor';
+import { GmailSendService } from './tramitacao/gmail-send.service';
+import { TramitacaoService } from './tramitacao/tramitacao.service';
+import { TramitacaoSyncProcessor } from './tramitacao/tramitacao-sync.processor';
 import { ContactsController } from './contacts/contacts.controller';
 import { ContactsService } from './contacts/contacts.service';
 import { ContactsRepository } from './contacts/contacts.repository';
@@ -42,6 +45,7 @@ import { ScheduledMessagesProcessor } from './scheduled-messages/scheduled-messa
       { name: 'outbound-messages' },
       { name: 'chatbot-processor' },
       { name: 'drive-sync' },
+      { name: 'tramitacao-sync' },
       { name: SCHEDULED_MESSAGES_QUEUE },
       // Produz aqui (inbox e abertura de conversa); quem consome é o
       // AvatarHydrationProcessor, no ZappfyModule.
@@ -79,6 +83,9 @@ import { ScheduledMessagesProcessor } from './scheduled-messages/scheduled-messa
     MediaResolverService,
     DriveService,
     DriveSyncProcessor,
+    GmailSendService,
+    TramitacaoService,
+    TramitacaoSyncProcessor,
     ContactsService,
     ContactsRepository,
     ScheduledMessagesService,
