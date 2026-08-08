@@ -124,6 +124,7 @@ model User {
   inboxViews            InboxView[]
   conversationReads     ConversationRead[]
   assignedCards         Card[]             @relation("CardAssignee")
+  assignedTasks         Task[]             @relation("TaskAssignee")
 
   @@map("users")
 }
@@ -201,6 +202,7 @@ model Organization {
   segments      Segment[]
   projects      Project[]
   knowledgeDocuments KnowledgeDocument[]
+  tasks         Task[]
 
   @@map("organizations")
 }
@@ -468,6 +470,7 @@ model Contact {
   tags          ContactTag[]
   aiMemories    AiAgentMemory[]
   cards         Card[]           @relation("CardContact")
+  tasks         Task[]
 
   @@index([organizationId, phone], name: "idx_contact_org_phone")
   @@index([organizationId, email], name: "idx_contact_org_email")
@@ -571,6 +574,7 @@ model Conversation {
   aiPendingActions AiPendingAction[]
   reads            ConversationRead[]
   cards            Card[]                 @relation("CardConversation")
+  tasks            Task[]
 
   @@index([organizationId, status], name: "idx_conv_org_status")
   @@index([organizationId, assignedToId], name: "idx_conv_org_agent")
@@ -1758,4 +1762,52 @@ model AutomationRun {
   @@index([traceId], name: "idx_run_trace")
   @@index([status, startedAt(sort: Desc)], name: "idx_run_status_time")
   @@map("automation_runs")
+}
+
+// ─── Tarefas (gestão de tarefas do escritório) ───────────────
+enum TaskStatus {
+  TODO
+  DOING
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  title          String
+  description    String?      @db.Text
+  status         TaskStatus   @default(TODO)
+  priority       TaskPriority @default(MEDIUM)
+  /// Categoria livre p/ o fluxo do escritório (ex: PERICIA, EMENDA_INICIAL,
+  /// PROTOCOLO, PRAZO, CONTATO, DOCUMENTO, AUDIENCIA, OUTRO). String p/ o
+  /// operador ajustar sem migração.
+  category       String?
+  dueAt          DateTime?    @map("due_at")
+  completedAt    DateTime?    @map("completed_at")
+  contactId      String?      @map("contact_id")
+  conversationId String?      @map("conversation_id")
+  assignedToId   String?      @map("assigned_to_id")
+  /// Autor da tarefa (audit) — só o id, sem FK/relação.
+  createdById    String?      @map("created_by_id")
+  /// Integração Google Agenda: id/link do evento quando sincronizado.
+  calendarEventId  String?    @map("calendar_event_id")
+  calendarHtmlLink String?    @map("calendar_html_link")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  deletedAt      DateTime?    @map("deleted_at")
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  assignedTo   User?         @relation("TaskAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, dueAt], name: "idx_task_org_status_due")
+  @@index([organizationId, dueAt], name: "idx_task_org_due")
+  @@map("tasks")
 }
