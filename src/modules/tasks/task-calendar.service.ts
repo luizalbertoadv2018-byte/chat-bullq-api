@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createSign } from 'crypto';
 
 /**
  * Sincroniza tarefas com o Google Agenda do escritório (one-way: tarefa →
@@ -42,6 +43,9 @@ export class TaskCalendarService {
   private get refreshToken() {
     return this.config.get<string>('GOOGLE_OAUTH_REFRESH_TOKEN');
   }
+  private get saJsonB64() {
+    return this.config.get<string>('GOOGLE_SA_JSON_B64');
+  }
   private get calendarId() {
     return (
       this.config.get<string>('TASKS_CALENDAR_ID') ??
@@ -49,19 +53,34 @@ export class TaskCalendarService {
     );
   }
 
+  private get hasServiceAccount() {
+    return !!this.saJsonB64;
+  }
+  private get hasOAuth() {
+    return !!(this.clientId && this.clientSecret && this.refreshToken);
+  }
+
   isEnabled(): boolean {
-    return !!(
-      this.clientId &&
-      this.clientSecret &&
-      this.refreshToken &&
-      this.calendarId
-    );
+    return !!((this.hasServiceAccount || this.hasOAuth) && this.calendarId);
   }
 
   private async accessToken(): Promise<string> {
     if (this.cached && Date.now() < this.cached.expiresAt) {
       return this.cached.token;
     }
+    // Service account (JWT) tem prioridade — não expira token de refresh, ideal
+    // p/ calendário COMPARTILHADO com o e-mail da SA. Fallback: OAuth de usuário.
+    const json = this.hasServiceAccount
+      ? await this.tokenFromServiceAccount()
+      : await this.tokenFromOAuth();
+    this.cached = {
+      token: json.access_token,
+      expiresAt: Date.now() + ((json.expires_in ?? 3600) - 60) * 1000,
+    };
+    return json.access_token;
+  }
+
+  private async tokenFromOAuth(): Promise<{ access_token: string; expires_in?: number }> {
     const res = await fetch(GOOGLE_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -73,17 +92,46 @@ export class TaskCalendarService {
       }).toString(),
     });
     if (!res.ok) {
-      throw new Error(`google token ${res.status}: ${await res.text()}`);
+      throw new Error(`google oauth token ${res.status}: ${await res.text()}`);
     }
-    const json = (await res.json()) as {
-      access_token: string;
-      expires_in?: number;
-    };
-    this.cached = {
-      token: json.access_token,
-      expiresAt: Date.now() + ((json.expires_in ?? 3600) - 60) * 1000,
-    };
-    return json.access_token;
+    return (await res.json()) as { access_token: string; expires_in?: number };
+  }
+
+  private async tokenFromServiceAccount(): Promise<{ access_token: string; expires_in?: number }> {
+    const sa = JSON.parse(
+      Buffer.from(this.saJsonB64 as string, 'base64').toString('utf8'),
+    ) as { client_email: string; private_key: string };
+
+    const now = Math.floor(Date.now() / 1000);
+    const b64url = (data: Buffer | string): string =>
+      Buffer.from(data).toString('base64url');
+    const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }));
+    const claims = b64url(
+      JSON.stringify({
+        iss: sa.client_email,
+        scope: 'https://www.googleapis.com/auth/calendar',
+        aud: GOOGLE_TOKEN_URL,
+        iat: now,
+        exp: now + 3600,
+      }),
+    );
+    const signer = createSign('RSA-SHA256');
+    signer.update(`${header}.${claims}`);
+    const signature = signer.sign(sa.private_key).toString('base64url');
+    const jwt = `${header}.${claims}.${signature}`;
+
+    const res = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion: jwt,
+      }).toString(),
+    });
+    if (!res.ok) {
+      throw new Error(`google sa token ${res.status}: ${await res.text()}`);
+    }
+    return (await res.json()) as { access_token: string; expires_in?: number };
   }
 
   private eventBody(task: CalendarTaskInput) {
