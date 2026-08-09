@@ -18,6 +18,7 @@ import { LerTranscricaoReuniaoTool } from './builtin/ler-transcricao-reuniao.too
 import { AgendarReuniaoTool } from './builtin/agendar-reuniao.tool';
 import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
 import { MoverNoFunilTool } from './builtin/mover-no-funil.tool';
+import { ChecklistDocumentosTool } from './builtin/checklist-documentos.tool';
 import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
 import { HoppeClientService } from './client-ops/hoppe-client.service';
 import { ZapSignClientService } from './client-ops/zapsign-client.service';
@@ -36,6 +37,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ConfirmationsModule } from '../confirmations/confirmations.module';
 import { SalesRecoveryModule } from '../../sales-recovery/sales-recovery.module';
 import { PipelinesModule } from '../../pipelines/pipelines.module';
+import { DocumentosBeneficioModule } from '../../documentos-beneficio/documentos-beneficio.module';
 
 @Module({
   imports: [
@@ -45,6 +47,7 @@ import { PipelinesModule } from '../../pipelines/pipelines.module';
     ConfirmationsModule,
     SalesRecoveryModule,
     PipelinesModule,
+    DocumentosBeneficioModule,
     BullModule.registerQueue(
       { name: 'outbound-messages' },
       // Camada 2: o ZapSign tool empurra o cadastro coletado pro Tramitação
@@ -79,6 +82,7 @@ import { PipelinesModule } from '../../pipelines/pipelines.module';
     AgendarReuniaoTool,
     MoveRecoveryCardTool,
     MoverNoFunilTool,
+    ChecklistDocumentosTool,
     EnviarDocumentoAssinaturaTool,
     ToolRegistry,
     HttpToolExecutorService,

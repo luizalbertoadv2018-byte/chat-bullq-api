@@ -19,6 +19,7 @@ import { LerTranscricaoReuniaoTool } from './builtin/ler-transcricao-reuniao.too
 import { AgendarReuniaoTool } from './builtin/agendar-reuniao.tool';
 import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
 import { MoverNoFunilTool } from './builtin/mover-no-funil.tool';
+import { ChecklistDocumentosTool } from './builtin/checklist-documentos.tool';
 import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
 
 /**
@@ -58,6 +59,7 @@ export class ToolRegistry {
     agendarReuniao: AgendarReuniaoTool,
     moveRecoveryCard: MoveRecoveryCardTool,
     moverNoFunil: MoverNoFunilTool,
+    checklistDocumentos: ChecklistDocumentosTool,
     enviarDocumentoAssinatura: EnviarDocumentoAssinaturaTool,
   ) {
     this.register(reply, ['ORCHESTRATOR', 'WORKER']);
@@ -84,6 +86,10 @@ export class ToolRegistry {
     // Em Análise. Liberado p/ todos — o agente de tema qualifica o lead. Se a
     // conversa não tem card (agente sem pipeline), a tool é no-op.
     this.register(moverNoFunil, ['ORCHESTRATOR', 'WORKER']);
+    // Checklist de documentos do benefício: ver/cobrar/marcar. Liberado p/
+    // todos — o agente de tema cobra o que falta. No-op se o agente não tem
+    // pipeline ou o benefício não tem documentos configurados.
+    this.register(checklistDocumentos, ['ORCHESTRATOR', 'WORKER']);
 
     // Client-ops (implementação): restritas aos agentes do env
     // CLIENT_OPS_AGENT_IDS (csv) — default Sofia. Mexem com credenciais

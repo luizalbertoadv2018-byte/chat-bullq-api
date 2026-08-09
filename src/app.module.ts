@@ -14,6 +14,7 @@ import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { TagsModule } from './modules/tags/tags.module';
 import { ConversationSituacoesModule } from './modules/conversation-situacoes/conversation-situacoes.module';
+import { DocumentosBeneficioModule } from './modules/documentos-beneficio/documentos-beneficio.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
@@ -63,6 +64,7 @@ import redisConfig from './config/redis.config';
     KnowledgeModule,
     TagsModule,
     ConversationSituacoesModule,
+    DocumentosBeneficioModule,
     ChatbotModule,
     DashboardModule,
     RatingsModule,

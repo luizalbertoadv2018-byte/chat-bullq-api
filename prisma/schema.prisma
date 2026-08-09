@@ -190,6 +190,7 @@ model Organization {
   quickReplies  QuickReply[]
   tags          Tag[]
   situacoes     ConversationSituacao[]
+  documentosBeneficio DocumentoBeneficio[]
   notifications Notification[]
   invitations   Invitation[]
   apiKeys       ApiKey[]
@@ -619,6 +620,26 @@ model ConversationSituacao {
   @@unique([organizationId, name])
   @@index([organizationId], name: "idx_situacao_org")
   @@map("conversation_situacoes")
+}
+
+/// Documento exigido por benefício (pipeline). Checklist que a IA usa pra saber
+/// o que o cliente já mandou e cobrar o que falta antes de protocolar.
+/// O "recebido" fica em contact.metadata.documentos[docId]. Gerenciado em
+/// Configurações → Documentos.
+model DocumentoBeneficio {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  pipelineId     String   @map("pipeline_id")
+  name           String
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipeline     Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, pipelineId], name: "idx_docbenef_org_pipeline")
+  @@map("documentos_beneficio")
 }
 
 model ConversationRating {
@@ -1499,7 +1520,8 @@ model Pipeline {
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   stages       PipelineStage[]
   cards        Card[]
-  agents       AiAgent[]       @relation("AgentPipeline")
+  agents       AiAgent[]            @relation("AgentPipeline")
+  documentos   DocumentoBeneficio[]
 
   @@unique([organizationId, key], name: "uq_pipeline_org_key")
   @@index([organizationId, archived])
