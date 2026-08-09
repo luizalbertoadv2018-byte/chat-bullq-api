@@ -64,13 +64,27 @@ export class TramitacaoService {
     return !!this.token;
   }
 
-  /** Normaliza telefone BR para DDD+8dígitos (remove 55 e o 9º dígito). */
+  /** Normaliza telefone BR para DDD+8dígitos (remove 55 e o 9º dígito).
+   *  Usado como CHAVE do índice e da busca. */
   normalizePhone(raw: string | null | undefined): string {
     let n = (raw ?? '').replace(/\D/g, '');
     if (!n) return '';
     if (n.length > 11 && n.startsWith('55')) n = n.slice(2);
     if (n.length === 11 && n[2] === '9') n = n.slice(0, 2) + n.slice(3);
     return n;
+  }
+
+  /**
+   * Telefone BR para GRAVAR no Tramitação: só dígitos, SEM o código do país
+   * (55). NÃO usar `slice(-11)` cru: um número 55+DDD+8díg (12 dígitos) vira
+   * "56..." errado, e aí a normalizePhone da próxima busca não bate → cria
+   * cliente duplicado. Removendo o 55 primeiro, o que gravamos e o que
+   * buscamos reduzem pro mesmo DDD+8.
+   */
+  private brMobile(raw: string | null | undefined): string {
+    let n = (raw ?? '').replace(/\D/g, '');
+    if (n.length > 11 && n.startsWith('55')) n = n.slice(2);
+    return n.slice(-11);
   }
 
   private async api<T = any>(
@@ -152,7 +166,7 @@ export class TramitacaoService {
       customer: {
         name: (name && name.trim()) || `Contato ${phone}`,
         customer_type: 'contato',
-        phone_mobile: (phone || '').replace(/\D/g, '').slice(-11),
+        phone_mobile: this.brMobile(phone),
       },
     });
     const id = data && (data.customer ? data.customer.id : data.id);
@@ -260,7 +274,7 @@ export class TramitacaoService {
   }): Promise<TramCustomer | null> {
     const digits = onlyDigits(params.cpf);
     if (!isValidCpf(digits)) return null;
-    const phoneMobile = params.phone ? onlyDigits(params.phone).slice(-11) : undefined;
+    const phoneMobile = params.phone ? this.brMobile(params.phone) : undefined;
 
     // 1) já existe cliente com esse CPF no Tramitação.
     const byCpf = await this.findByCpf(digits);
@@ -323,7 +337,7 @@ export class TramitacaoService {
     if (isValidCpf(cpf)) f.cpf_cnpj = cpf;
     put('email', cad.email);
     if (cad.phone) {
-      const pm = onlyDigits(cad.phone).slice(-11);
+      const pm = this.brMobile(cad.phone);
       if (pm) f.phone_mobile = pm;
     }
     put('marital_status', cad.maritalStatus);
