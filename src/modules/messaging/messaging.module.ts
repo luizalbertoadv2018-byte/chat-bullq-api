@@ -9,6 +9,7 @@ import { WatchdogModule } from '../routing/watchdog/watchdog.module';
 import { SegmentsModule } from '../segments/segments.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { SalesRecoveryModule } from '../sales-recovery/sales-recovery.module';
+import { PipelinesModule } from '../pipelines/pipelines.module';
 import { IdempotencyService } from './pipeline/idempotency.service';
 import { ContactResolverService } from './pipeline/contact-resolver.service';
 import { ConversationResolverService } from './pipeline/conversation-resolver.service';
@@ -59,6 +60,7 @@ import { ScheduledMessagesProcessor } from './scheduled-messages/scheduled-messa
     SegmentsModule,
     ProjectsModule,
     SalesRecoveryModule,
+    PipelinesModule,
   ],
   controllers: [
     ConversationsController,

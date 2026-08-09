@@ -5,6 +5,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { MediaResolverService } from '../messages/media-resolver.service';
 import { TramitacaoService, TramCadastro } from './tramitacao.service';
 import { GmailSendService } from './gmail-send.service';
+import { PipelinesService } from '../../pipelines/pipelines.service';
 
 /**
  * A fila `tramitacao-sync` carrega os tipos de trabalho abaixo. **NADA vai pro
@@ -58,6 +59,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     private readonly mediaResolver: MediaResolverService,
     private readonly tramitacao: TramitacaoService,
     private readonly gmail: GmailSendService,
+    private readonly pipelines: PipelinesService,
     @InjectQueue('tramitacao-sync') private readonly queue: Queue,
   ) {
     super();
@@ -228,10 +230,26 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     // que ainda não foram espelhadas.
     const backfilled = await this.backfillMedia(contact.id, contact.organizationId);
 
+    // Fechamento de ciclo: liberado (assinou ou fechou presencial) → move o
+    // card do contato pro estágio "Contrato Assinado" do funil. Fire-and-forget.
+    let cardMoved = 0;
+    try {
+      const r = await this.pipelines.moveContactCardsToStage(
+        contact.id,
+        contact.organizationId,
+        'Contrato Assinado',
+      );
+      cardMoved = r.moved;
+    } catch (err: any) {
+      this.logger.warn(
+        `tramitação(release/${origem}): mover card falhou p/ contato ${contact.id}: ${err?.message ?? err}`,
+      );
+    }
+
     this.logger.log(
-      `tramitação(release/${origem}): contato ${contact.id} → cliente ${customer.id}; backfill de ${backfilled} mídia(s)`,
+      `tramitação(release/${origem}): contato ${contact.id} → cliente ${customer.id}; backfill=${backfilled}; card→ContratoAssinado=${cardMoved}`,
     );
-    return { released: true, customerId: customer.id, backfilled };
+    return { released: true, customerId: customer.id, backfilled, cardMoved };
   }
 
   /**

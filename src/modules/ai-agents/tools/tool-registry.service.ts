@@ -18,6 +18,7 @@ import { ListarReunioesClienteTool } from './builtin/listar-reunioes-cliente.too
 import { LerTranscricaoReuniaoTool } from './builtin/ler-transcricao-reuniao.tool';
 import { AgendarReuniaoTool } from './builtin/agendar-reuniao.tool';
 import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
+import { MoverNoFunilTool } from './builtin/mover-no-funil.tool';
 import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
 
 /**
@@ -56,6 +57,7 @@ export class ToolRegistry {
     lerTranscricaoReuniao: LerTranscricaoReuniaoTool,
     agendarReuniao: AgendarReuniaoTool,
     moveRecoveryCard: MoveRecoveryCardTool,
+    moverNoFunil: MoverNoFunilTool,
     enviarDocumentoAssinatura: EnviarDocumentoAssinaturaTool,
   ) {
     this.register(reply, ['ORCHESTRATOR', 'WORKER']);
@@ -78,6 +80,10 @@ export class ToolRegistry {
     // Usado pra "não recebi o brinde" / "cadê o agente grátis" antes
     // de pedir email novamente ou prometer liberação.
     this.register(checkMembersAccess, ['ORCHESTRATOR', 'WORKER']);
+    // Mover o card no funil do tema (qualificação): Qualificado/Desqualificado/
+    // Em Análise. Liberado p/ todos — o agente de tema qualifica o lead. Se a
+    // conversa não tem card (agente sem pipeline), a tool é no-op.
+    this.register(moverNoFunil, ['ORCHESTRATOR', 'WORKER']);
 
     // Client-ops (implementação): restritas aos agentes do env
     // CLIENT_OPS_AGENT_IDS (csv) — default Sofia. Mexem com credenciais

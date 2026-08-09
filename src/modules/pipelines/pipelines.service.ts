@@ -514,6 +514,78 @@ export class PipelinesService {
     });
   }
 
+  /** Normaliza nome de estágio p/ casar sem acento/caixa. */
+  private normalizeStageName(s: string): string {
+    return Array.from((s ?? '').normalize('NFD'))
+      .filter((ch) => {
+        const c = ch.codePointAt(0) ?? 0;
+        return c < 0x0300 || c > 0x036f;
+      })
+      .join('')
+      .toLowerCase()
+      .trim();
+  }
+
+  /**
+   * Move os cards que casam com `where` para o estágio cujo nome bate com
+   * `stageName` (sem acento/caixa; exato, senão "contém"), no topo da coluna.
+   * Núcleo do fechamento de ciclo (assinou → "Contrato Assinado") e da tool
+   * da IA (qualifica/desqualifica). Idempotente: se já está lá, pula.
+   */
+  private async moveCardsToStage(
+    where: { organizationId: string; conversationId?: string; contactId?: string },
+    stageName: string,
+  ): Promise<{ moved: number; stage: string | null }> {
+    const target = this.normalizeStageName(stageName);
+    if (!target) return { moved: 0, stage: null };
+    const cards = await this.prisma.card.findMany({
+      where,
+      select: { id: true, pipelineId: true, stageId: true },
+    });
+    let moved = 0;
+    let stageLabel: string | null = null;
+    for (const card of cards) {
+      const stages = await this.prisma.pipelineStage.findMany({
+        where: { pipelineId: card.pipelineId },
+        select: { id: true, name: true },
+      });
+      let stage = stages.find((s) => this.normalizeStageName(s.name) === target);
+      if (!stage) {
+        stage = stages.find((s) => this.normalizeStageName(s.name).includes(target));
+      }
+      if (!stage || stage.id === card.stageId) continue;
+      try {
+        await this.moveCard(card.id, where.organizationId, {
+          toStageId: stage.id,
+          toIndex: 0,
+        });
+        moved++;
+        stageLabel = stage.name;
+      } catch {
+        /* ignora — não bloqueia o fluxo */
+      }
+    }
+    return { moved, stage: stageLabel };
+  }
+
+  /** Move os cards de uma CONVERSA para o estágio nomeado (tool da IA). */
+  async moveConversationCardsToStage(
+    conversationId: string,
+    organizationId: string,
+    stageName: string,
+  ) {
+    return this.moveCardsToStage({ conversationId, organizationId }, stageName);
+  }
+
+  /** Move os cards de um CONTATO para o estágio nomeado (fechamento de ciclo). */
+  async moveContactCardsToStage(
+    contactId: string,
+    organizationId: string,
+    stageName: string,
+  ) {
+    return this.moveCardsToStage({ contactId, organizationId }, stageName);
+  }
+
   // ─── helpers ───────────────────────────────────
 
   private async assertPipeline(id: string, organizationId: string) {
