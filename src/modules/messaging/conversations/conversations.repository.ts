@@ -298,6 +298,7 @@ export class ConversationsRepository {
           assignedTo: {
             select: { id: true, name: true, avatarUrl: true },
           },
+          situacao: { select: { id: true, name: true, color: true } },
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1,
@@ -452,6 +453,7 @@ export class ConversationsRepository {
         channel: true,
         assignedTo: { select: { id: true, name: true, avatarUrl: true } },
         department: true,
+        situacao: true,
         tags: { include: { tag: true } },
         auditLogs: { orderBy: { createdAt: 'desc' }, take: 20 },
       },

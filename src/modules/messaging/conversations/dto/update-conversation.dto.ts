@@ -21,6 +21,14 @@ export class UpdateConversationDto {
   @IsString()
   departmentId?: string | null;
 
+  // Situação de negócio (rótulo configurável). string = setar, null = limpar.
+  // NÃO passa pela FSM — é um campo simples, ortogonal ao `status`.
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  situacaoId?: string | null;
+
   /** Apelido interno da conversa — só nós vemos, o cliente não. */
   @ApiPropertyOptional()
   @IsOptional()

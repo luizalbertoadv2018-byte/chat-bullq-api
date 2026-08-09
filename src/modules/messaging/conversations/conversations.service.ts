@@ -448,6 +448,15 @@ export class ConversationsService {
       });
     }
 
+    // Situação de negócio — campo simples (sem FSM). string = setar, null = limpar.
+    if (dto.situacaoId !== undefined) {
+      await this.repository.update(id, {
+        situacao: dto.situacaoId
+          ? { connect: { id: dto.situacaoId } }
+          : { disconnect: true },
+      });
+    }
+
     if (dto.subject !== undefined) {
       const trimmed = dto.subject.trim();
       await this.repository.update(id, {

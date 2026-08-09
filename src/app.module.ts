@@ -13,6 +13,7 @@ import { RoutingModule } from './modules/routing/routing.module';
 import { QuickRepliesModule } from './modules/quick-replies/quick-replies.module';
 import { KnowledgeModule } from './modules/knowledge/knowledge.module';
 import { TagsModule } from './modules/tags/tags.module';
+import { ConversationSituacoesModule } from './modules/conversation-situacoes/conversation-situacoes.module';
 import { ChatbotModule } from './modules/chatbot/chatbot.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RatingsModule } from './modules/ratings/ratings.module';
@@ -61,6 +62,7 @@ import redisConfig from './config/redis.config';
     QuickRepliesModule,
     KnowledgeModule,
     TagsModule,
+    ConversationSituacoesModule,
     ChatbotModule,
     DashboardModule,
     RatingsModule,

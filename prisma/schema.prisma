@@ -189,6 +189,7 @@ model Organization {
   chatbotFlows  ChatbotFlow[]
   quickReplies  QuickReply[]
   tags          Tag[]
+  situacoes     ConversationSituacao[]
   notifications Notification[]
   invitations   Invitation[]
   apiKeys       ApiKey[]
@@ -517,6 +518,10 @@ model Conversation {
   assignedToId    String?            @map("assigned_to_id")
   departmentId    String?            @map("department_id")
   status          ConversationStatus @default(PENDING)
+  // Situação customizável pelo escritório (Contrato Assinado, Qualificado, ...).
+  // Ortogonal ao `status` do sistema — NÃO participa da FSM/IA/watchdog, é só
+  // um rótulo de negócio configurável em Configurações → Situações.
+  situacaoId      String?            @map("situacao_id")
   subject         String?
   protocol        String?
   isGroup         Boolean            @default(false) @map("is_group")
@@ -567,6 +572,7 @@ model Conversation {
   contact      Contact      @relation(fields: [contactId], references: [id])
   assignedTo   User?        @relation("AssignedAgent", fields: [assignedToId], references: [id], onDelete: SetNull)
   department   Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  situacao     ConversationSituacao? @relation(fields: [situacaoId], references: [id], onDelete: SetNull)
   activeAgent  AiAgent?     @relation("ActiveAgent", fields: [activeAgentId], references: [id], onDelete: SetNull)
 
   messages         Message[]
@@ -585,12 +591,34 @@ model Conversation {
   @@index([organizationId, assignedToId], name: "idx_conv_org_agent")
   @@index([organizationId, channelId], name: "idx_conv_org_channel")
   @@index([organizationId, isArchived], name: "idx_conv_org_archived")
+  @@index([situacaoId], name: "idx_conv_situacao")
   @@index([segmentId, contactId], name: "idx_conv_segment_contact")
   @@index([contactId], name: "idx_conv_contact")
   // NULLs são distintos no Postgres → não afeta canais de chat.
   @@unique([channelId, externalThreadId], name: "uq_conv_channel_thread", map: "uq_conv_channel_thread")
   @@index([lastMessageAt], name: "idx_conv_last_msg")
   @@map("conversations")
+}
+
+/// Situação de negócio da conversa, configurável por organização (ex.:
+/// "Contrato Assinado", "Qualificado", "Desqualificado"). Rótulo puro — não
+/// interfere no `status`/FSM/IA. Gerenciado em Configurações → Situações.
+model ConversationSituacao {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  name           String
+  color          String   @default("#6B7280")
+  /// Ordem de exibição (menor primeiro).
+  order          Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId], name: "idx_situacao_org")
+  @@map("conversation_situacoes")
 }
 
 model ConversationRating {
