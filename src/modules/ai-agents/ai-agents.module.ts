@@ -29,6 +29,8 @@ import { ConfirmationExecutorModule } from './confirmations/confirmation-executo
 import { RagModule } from './rag/rag.module';
 import { EvalsModule } from './evals/evals.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { PipelinesModule } from '../pipelines/pipelines.module';
+import { ThemeCardService } from './runner/theme-card.service';
 
 @Module({
   imports: [
@@ -48,11 +50,13 @@ import { KnowledgeModule } from '../knowledge/knowledge.module';
     RagModule,
     EvalsModule,
     KnowledgeModule,
+    PipelinesModule,
   ],
   controllers: [AgentsController, AiCatalogController],
   providers: [
     PromptBuilderService,
     AiAgentRunnerService,
+    ThemeCardService,
     ModelRouterService,
     AgentRunJanitorService,
     AgentRouterService,

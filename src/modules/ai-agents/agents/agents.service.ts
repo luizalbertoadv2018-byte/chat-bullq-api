@@ -71,6 +71,7 @@ export class AgentsService {
         category: dto.category,
         capabilities: dto.capabilities ?? [],
         triggerKeywords: dto.triggerKeywords ?? [],
+        pipelineId: dto.pipelineId ?? null,
         modelId: dto.modelId,
         modelParams: dto.modelParams as object | undefined,
         systemPrompt: dto.systemPrompt,

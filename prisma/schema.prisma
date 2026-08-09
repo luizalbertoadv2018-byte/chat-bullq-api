@@ -1032,6 +1032,12 @@ model AiAgent {
   // "auxílio-doença", "bpc", "loas" → cada um pro seu worker).
   triggerKeywords String[] @default([]) @map("trigger_keywords")
 
+  // ─── Pipeline de destino (lead novo) ───────────────────────
+  // Quando este agent (de tema) assume uma conversa, um card é criado
+  // automaticamente no 1º estágio deste pipeline. Null = agent não gera
+  // card (ex.: triagem que ainda não sabe o tema). Ver ThemeCardService.
+  pipelineId String? @map("pipeline_id")
+
   // ─── Organograma matricial ágil ────────────────────────────
   // parentAgentId: chefia direta — quem este agent reporta. Null = raiz (CEO/diretoria).
   // department: setor (VENDAS, SUPORTE, CS, CONTABIL, JURIDICO, FINANCEIRO, OPERACOES, ...).
@@ -1072,6 +1078,7 @@ model AiAgent {
   deletedAt DateTime? @map("deleted_at")
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipeline     Pipeline?    @relation("AgentPipeline", fields: [pipelineId], references: [id], onDelete: SetNull)
 
   channels       AiAgentChannel[]
   memories       AiAgentMemory[]
@@ -1087,6 +1094,7 @@ model AiAgent {
   @@index([organizationId, kind], name: "idx_ai_agent_org_kind")
   @@index([parentAgentId], name: "idx_ai_agent_parent")
   @@index([organizationId, department], name: "idx_ai_agent_org_dept")
+  @@index([pipelineId], name: "idx_ai_agent_pipeline")
   @@map("ai_agents")
 }
 
@@ -1491,6 +1499,7 @@ model Pipeline {
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   stages       PipelineStage[]
   cards        Card[]
+  agents       AiAgent[]       @relation("AgentPipeline")
 
   @@unique([organizationId, key], name: "uq_pipeline_org_key")
   @@index([organizationId, archived])

@@ -12,6 +12,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -64,6 +65,16 @@ export class CreateAgentDto {
   @IsString({ each: true })
   @MaxLength(60, { each: true })
   triggerKeywords?: string[];
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Pipeline de destino: quando este agente assume um lead, cria um card no 1o estagio ("Novo") deste pipeline. Null = nao gera card (ex.: triagem).',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  pipelineId?: string | null;
 
   @ApiProperty({ example: 'claude-opus-4-8' })
   @IsString()

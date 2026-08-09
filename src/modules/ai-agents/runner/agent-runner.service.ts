@@ -37,6 +37,7 @@ import { IntentType } from '../classifier/intent.types';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { sanitizeAssistantText } from './text-guards';
 import { MediaUrlResolverService } from './media-url-resolver.service';
+import { ThemeCardService } from './theme-card.service';
 
 // Corte de custo (2026-08-07): cada iteração e cada mensagem do histórico é
 // reenviada e RE-COBRADA a cada chamada ao LLM. Reduzir os dois derruba o
@@ -100,6 +101,7 @@ export class AiAgentRunnerService {
     private readonly knowledge: KnowledgeService,
     private readonly realtime: RealtimeGateway,
     private readonly mediaUrlResolver: MediaUrlResolverService,
+    private readonly themeCard: ThemeCardService,
     @InjectQueue('memory-extractor')
     private readonly memoryExtractorQueue: Queue,
     @InjectQueue('rag-indexer')
@@ -330,6 +332,15 @@ export class AiAgentRunnerService {
         where: { id: conversation.id },
         data: { activeAgentId: agent.id },
       });
+
+      // Auto-card por tema: se este agente tem um pipeline de destino, garante
+      // que a conversa tenha um card no 1º estágio ("Novo") daquele funil.
+      // Fire-and-forget — nunca bloqueia nem derruba o run.
+      this.themeCard
+        .ensureForConversation(conversation.id, conversation.organizationId, agent.id)
+        .catch((e) =>
+          this.logger.warn(`themeCard falhou p/ conv ${conversation.id}: ${e?.message ?? e}`),
+        );
 
       while (iterationCount < MAX_TOOL_ITERATIONS) {
         iterationCount++;
