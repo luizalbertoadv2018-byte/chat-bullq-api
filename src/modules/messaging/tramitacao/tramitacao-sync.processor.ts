@@ -196,10 +196,14 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       phone: pending.cadastro?.phone ?? contact.phone,
     };
 
-    const customer = await this.tramitacao.pushCadastro(cadastro);
+    // Reusa o cliente já vinculado (se houver) — não duplica em reexecuções.
+    const customer = await this.tramitacao.releaseCustomer(
+      cadastro,
+      meta.tramitacaoCustomerId ?? null,
+    );
     if (!customer) {
       this.logger.warn(
-        `tramitação(release/${origem}): pushCadastro falhou p/ contato ${contact.id} (sem nome nem CPF?)`,
+        `tramitação(release/${origem}): não criou/achou cliente p/ contato ${contact.id} (sem nome nem CPF?)`,
       );
       return { skipped: 'push-falhou' };
     }

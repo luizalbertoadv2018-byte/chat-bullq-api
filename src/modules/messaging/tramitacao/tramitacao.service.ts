@@ -382,6 +382,33 @@ export class TramitacaoService {
     return this.createCliente(fields);
   }
 
+  /**
+   * Liberação de um contato pro Tramitação. Se o contato JÁ tem um cliente
+   * vinculado (tramitacaoCustomerId), ATUALIZA esse mesmo cliente (nunca
+   * duplica, mesmo que o telefone gravado antes estivesse mutilado). Senão,
+   * reconcilia/cria via pushCadastro.
+   */
+  async releaseCustomer(
+    cad: TramCadastro,
+    linkedCustomerId?: number | null,
+  ): Promise<TramCustomer | null> {
+    if (linkedCustomerId) {
+      const fields = this.cadastroToFields(cad);
+      if (fields.cpf_cnpj) fields.customer_type = 'cliente'; // ganhou CPF → cliente
+      await this.updateCustomer(linkedCustomerId, fields);
+      const email = await this.ensureEmail(linkedCustomerId);
+      const cust: TramCustomer = {
+        id: linkedCustomerId,
+        email,
+        name: cad.name ?? null,
+      };
+      const k = this.normalizePhone(cad.phone);
+      if (k) this.index?.set(k, cust);
+      return cust;
+    }
+    return this.pushCadastro(cad);
+  }
+
   /** Garante o cliente para um contato, preferindo o já vinculado. Usado pela
    *  esteira de mídia: se o contato já foi casado por CPF, reusa aquele id. */
   async resolveForMedia(params: {
