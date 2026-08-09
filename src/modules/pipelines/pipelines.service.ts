@@ -514,6 +514,106 @@ export class PipelinesService {
     });
   }
 
+  /**
+   * Métricas de gestão do funil (dashboard): visão geral + por pipeline
+   * (conversão, ganhos/perdas, tempo médio até fechar, distribuição por
+   * estágio) + leads criados por dia no período.
+   */
+  async getMetrics(organizationId: string, days = 30) {
+    const clampedDays = Math.min(Math.max(days, 1), 180);
+    const since = new Date(Date.now() - clampedDays * 86_400_000);
+
+    const pipelines = await this.prisma.pipeline.findMany({
+      where: { organizationId, archived: false },
+      orderBy: { order: 'asc' },
+      include: { stages: { orderBy: { order: 'asc' } } },
+    });
+    const cards = await this.prisma.card.findMany({
+      where: { organizationId },
+      select: {
+        pipelineId: true,
+        stageId: true,
+        status: true,
+        createdAt: true,
+        closedAt: true,
+      },
+    });
+
+    const dayMs = 86_400_000;
+    const perPipeline = pipelines.map((p) => {
+      const pc = cards.filter((c) => c.pipelineId === p.id);
+      const won = pc.filter((c) => c.status === 'WON').length;
+      const lost = pc.filter((c) => c.status === 'LOST').length;
+      const open = pc.filter((c) => c.status === 'OPEN').length;
+      const decided = won + lost;
+      const closed = pc.filter((c) => c.closedAt);
+      const avgDaysToClose = closed.length
+        ? Math.round(
+            (closed.reduce(
+              (s, c) => s + (c.closedAt!.getTime() - c.createdAt.getTime()),
+              0,
+            ) /
+              closed.length /
+              dayMs) *
+              10,
+          ) / 10
+        : null;
+      return {
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        total: pc.length,
+        open,
+        won,
+        lost,
+        conversao: decided ? Math.round((won / decided) * 100) : null,
+        avgDaysToClose,
+        stages: p.stages.map((s) => ({
+          name: s.name,
+          type: s.type,
+          count: pc.filter((c) => c.stageId === s.id).length,
+        })),
+      };
+    });
+
+    const totalWon = cards.filter((c) => c.status === 'WON').length;
+    const totalLost = cards.filter((c) => c.status === 'LOST').length;
+    const totalOpen = cards.filter((c) => c.status === 'OPEN').length;
+    const decidedAll = totalWon + totalLost;
+
+    // Leads (cards) criados por dia no período.
+    const byDay = new Map<string, number>();
+    for (let i = 0; i < clampedDays; i++) {
+      const d = new Date(Date.now() - (clampedDays - 1 - i) * dayMs);
+      byDay.set(d.toISOString().slice(0, 10), 0);
+    }
+    for (const c of cards) {
+      if (c.createdAt >= since) {
+        const key = c.createdAt.toISOString().slice(0, 10);
+        if (byDay.has(key)) byDay.set(key, (byDay.get(key) ?? 0) + 1);
+      }
+    }
+    const leadsPorDia = Array.from(byDay.entries()).map(([date, count]) => ({
+      date,
+      count,
+    }));
+    const leadsNoPeriodo = leadsPorDia.reduce((s, d) => s + d.count, 0);
+
+    return {
+      overview: {
+        totalLeads: cards.length,
+        ativos: totalOpen,
+        ganhos: totalWon,
+        perdidos: totalLost,
+        conversao: decidedAll ? Math.round((totalWon / decidedAll) * 100) : null,
+        leadsNoPeriodo,
+        periodoDias: clampedDays,
+      },
+      pipelines: perPipeline,
+      leadsPorDia,
+    };
+  }
+
   /** Normaliza nome de estágio p/ casar sem acento/caixa. */
   private normalizeStageName(s: string): string {
     return Array.from((s ?? '').normalize('NFD'))

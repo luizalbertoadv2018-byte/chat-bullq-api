@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -33,6 +34,15 @@ export class PipelinesController {
   @ApiOperation({ summary: 'List pipelines for current org' })
   list(@CurrentOrg('id') orgId: string) {
     return this.service.listPipelines(orgId);
+  }
+
+  @Get('metrics')
+  @ApiOperation({ summary: 'Métricas de gestão do funil (dashboard)' })
+  metrics(
+    @CurrentOrg('id') orgId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.service.getMetrics(orgId, parseInt(days || '30', 10) || 30);
   }
 
   @Post()
