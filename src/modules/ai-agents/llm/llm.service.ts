@@ -29,6 +29,10 @@ const PRICING: Record<string, { in: number; out: number; cached: number }> = {
   'gpt-4.1': { in: 2, out: 8, cached: 0.5 },
   'gpt-4.1-mini': { in: 0.4, out: 1.6, cached: 0.1 },
   'gpt-4.1-nano': { in: 0.1, out: 0.4, cached: 0.025 },
+  // Família gpt-5 (APROX — confirmar em openai.com/pricing).
+  'gpt-5': { in: 1.25, out: 10, cached: 0.125 },
+  'gpt-5-mini': { in: 0.25, out: 2, cached: 0.025 },
+  'gpt-5-nano': { in: 0.05, out: 0.4, cached: 0.005 },
 };
 
 // ─── Formato da OpenAI Chat Completions ────────────────────────────────
@@ -119,18 +123,27 @@ export class LlmService {
       ? this.toOpenAiTools(this.sanitizeTools(req.tools))
       : undefined;
 
+    const reasoning = this.isReasoningModel(model);
     const body: Record<string, unknown> = {
       model,
       messages,
-      max_completion_tokens: req.maxTokens ?? 2048,
+      // Modelos de raciocínio (gpt-5 / o-series) contam tokens de "pensamento"
+      // DENTRO do output. Sem folga, o raciocínio pode consumir o limite e
+      // devolver resposta truncada/vazia — por isso um piso maior.
+      max_completion_tokens: reasoning
+        ? Math.max(req.maxTokens ?? 2048, 4096)
+        : req.maxTokens ?? 2048,
       ...(tools && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
       ...(this.acceptsSampling(model)
         ? { temperature: req.temperature ?? 0.7 }
         : {}),
+      // gpt-5: esforço de raciocínio BAIXO — resposta rápida ao lead sem
+      // gastar tokens pensando demais numa conversa simples.
+      ...(reasoning ? { reasoning_effort: 'low' } : {}),
       // Melhora o roteamento do prompt caching automático da OpenAI entre
       // turnos da mesma conversa (prefixo system + histórico idênticos).
       ...(req.cacheKey ? { prompt_cache_key: req.cacheKey } : {}),
-      ...(this.sanitizeModelParams(req.modelParams) as object),
+      ...(this.sanitizeModelParams(req.modelParams, model) as object),
     };
 
     let data: OpenAiResponse;
@@ -232,9 +245,14 @@ export class LlmService {
     return LLM_CONVERSATION_MODEL;
   }
 
-  /** Modelos de raciocínio (o-series, gpt-5) rejeitam temperature != 1. */
+  /** Modelos de raciocínio: gpt-5 e o-series ("pensam" antes de responder). */
+  private isReasoningModel(model: string): boolean {
+    return /^gpt-5/i.test(model) || /^o\d/i.test(model);
+  }
+
+  /** Modelos de raciocínio (o-series, gpt-5) rejeitam temperature/top_p != 1. */
   private acceptsSampling(model: string): boolean {
-    return !(/^o\d/i.test(model) || /^gpt-5/i.test(model));
+    return !this.isReasoningModel(model);
   }
 
   /**
@@ -394,8 +412,10 @@ export class LlmService {
    */
   private sanitizeModelParams(
     params: Record<string, unknown> | undefined,
+    model?: string,
   ): Record<string, unknown> {
     if (!params) return {};
+    const reasoning = model ? this.isReasoningModel(model) : false;
     const allowed = new Set([
       'top_p',
       'stop',
@@ -407,7 +427,10 @@ export class LlmService {
     ]);
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(params)) {
-      if (allowed.has(k)) out[k] = v;
+      if (!allowed.has(k)) continue;
+      // gpt-5 / o-series rejeitam top_p != default — não enviar.
+      if (reasoning && k === 'top_p') continue;
+      out[k] = v;
     }
     return out;
   }

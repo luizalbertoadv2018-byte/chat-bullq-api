@@ -21,5 +21,5 @@ export const LLM_SIMPLE_MODEL = 'gpt-4o-mini';
  * ~R$1,25 (~16x mais barato). Pra recuperar qualidade sem voltar ao 4o, dá
  * pra apontar aqui p/ 'gpt-4.1-mini' (~6x vs 4o, melhor em tools/instrução).
  */
-export const LLM_CONVERSATION_MODEL = 'gpt-4o-mini';
-// (restart trigger: migrado p/ OpenAI 2026-08-06; barateado 2026-08-07)
+export const LLM_CONVERSATION_MODEL = 'gpt-5-mini';
+// (restart trigger: migrado p/ OpenAI 2026-08-06; barateado 2026-08-07; conversation -> gpt-5-mini 2026-08-10)
