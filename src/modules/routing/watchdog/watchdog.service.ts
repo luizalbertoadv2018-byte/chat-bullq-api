@@ -68,7 +68,11 @@ export class WatchdogService {
     }
 
     const cfg = this.config.resolve(conversation.organization);
-    const delayMin = this.delayForStatus(conversation.status, cfg);
+    const delayMin = this.resolveDelayMin(
+      conversation.status,
+      conversation.stuckAttempts,
+      cfg,
+    );
     if (delayMin <= 0) return;
 
     const jobId = this.jobIdFor(conversationId);
@@ -127,6 +131,25 @@ export class WatchdogService {
    */
   async enqueueFromCron(conversationId: string): Promise<void> {
     return this.scheduleCheck(conversationId);
+  }
+
+  /**
+   * Delay da PRÓXIMA checagem. Se a org configurou cadência escalonada
+   * (`attemptDelaysMin`, ex: [30,60,1440]), usa o delay da tentativa atual
+   * (indexado por `stuckAttempts`, com clamp no último). Senão, cai no delay
+   * fixo por status (comportamento antigo).
+   */
+  private resolveDelayMin(
+    status: ConversationStatus,
+    stuckAttempts: number,
+    cfg: ReturnType<WatchdogConfigService['resolve']>,
+  ): number {
+    const ladder = cfg.attemptDelaysMin;
+    if (ladder && ladder.length > 0) {
+      const idx = Math.min(Math.max(stuckAttempts, 0), ladder.length - 1);
+      return ladder[idx];
+    }
+    return this.delayForStatus(status, cfg);
   }
 
   private delayForStatus(

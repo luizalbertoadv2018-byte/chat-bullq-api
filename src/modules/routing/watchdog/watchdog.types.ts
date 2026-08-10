@@ -28,6 +28,7 @@ export const DEFAULT_WATCHDOG_CONFIG: Required<WatchdogConfig> = {
   delayPendingMin: 15,
   delayHumanIdleMin: 60,
   maxAttempts: 3,
+  attemptDelaysMin: [],
 };
 
 /** Intervalo do cron de fallback. */
@@ -42,6 +43,13 @@ export interface WatchdogConfig {
   delayHumanIdleMin?: number;
   /** Tentativas antes de marcar como `isStuck`. */
   maxAttempts?: number;
+  /**
+   * Cadência ESCALONADA por tentativa, em minutos (ex: [30, 60, 1440] =
+   * 1º follow-up em 30min, 2º em 1h, 3º em 24h). Quando preenchido, o delay
+   * de cada tentativa vem daqui (indexado por `stuckAttempts`, com clamp no
+   * último) em vez dos delays fixos por status acima. Vazio = usa os fixos.
+   */
+  attemptDelaysMin?: number[];
 }
 
 export interface WatchdogJobData {

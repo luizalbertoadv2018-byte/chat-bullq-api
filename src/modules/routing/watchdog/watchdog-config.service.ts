@@ -41,6 +41,11 @@ export class WatchdogConfigService {
         override.delayHumanIdleMin ?? DEFAULT_WATCHDOG_CONFIG.delayHumanIdleMin,
       maxAttempts:
         override.maxAttempts ?? DEFAULT_WATCHDOG_CONFIG.maxAttempts,
+      attemptDelaysMin:
+        Array.isArray(override.attemptDelaysMin) &&
+        override.attemptDelaysMin.length > 0
+          ? override.attemptDelaysMin.filter((n) => Number.isFinite(n) && n > 0)
+          : DEFAULT_WATCHDOG_CONFIG.attemptDelaysMin,
     };
   }
 
