@@ -14,6 +14,7 @@ import { OrgRole } from '@prisma/client';
 import { ChannelsService } from './channels.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
+import { EmbeddedSignupDto } from './dto/embedded-signup.dto';
 import { JwtAuthGuard, OrgGuard, RolesGuard } from '../../../common/guards';
 import { CurrentChannelAccess, CurrentOrg, Roles } from '../../../common/decorators';
 import type { ChannelAccess } from '../../iam/channel-access/channel-access.service';
@@ -35,6 +36,21 @@ export class ChannelsController {
     @Body() dto: CreateChannelDto,
   ) {
     return this.service.create(org.id, dto, {
+      userOrganizationId: org.userOrganizationId,
+      role: org.userRole,
+    });
+  }
+
+  @Post('whatsapp-official/embedded-signup')
+  @ApiOperation({
+    summary:
+      'Cria um canal WhatsApp Oficial em modo COEXISTÊNCIA a partir do retorno do Embedded Signup da Meta (troca o code por token, assina o app na WABA e inscreve os campos de webhook de coexistência).',
+  })
+  embeddedSignup(
+    @CurrentOrg() org: { id: string; userOrganizationId: string; userRole: OrgRole },
+    @Body() dto: EmbeddedSignupDto,
+  ) {
+    return this.service.createFromEmbeddedSignup(org.id, dto, {
       userOrganizationId: org.userOrganizationId,
       role: org.userRole,
     });

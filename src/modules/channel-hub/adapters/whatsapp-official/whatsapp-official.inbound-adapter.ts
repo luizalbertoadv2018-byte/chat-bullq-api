@@ -118,6 +118,41 @@ export class WhatsAppOfficialInboundAdapter implements InboundChannelPort {
             continue;
           }
 
+          const field = change?.field;
+
+          // Coexistência — ecos de mensagens enviadas PELO CELULAR (app
+          // WhatsApp Business). Sem isso, tudo que o dono responde direto no
+          // celular somia do inbox. Viram mensagens de SAÍDA (isEcho).
+          if (field === 'smb_message_echoes') {
+            const echoes = value.message_echoes || [];
+            for (const echo of echoes) {
+              const normalized = this.mapper.normalizeEcho(echo);
+              if (normalized) result.messages.push(normalized);
+            }
+            continue;
+          }
+
+          // Coexistência — sincronização de histórico (até ~6 meses) disparada
+          // quando o número é conectado. Faz o backfill das conversas antigas.
+          if (field === 'history') {
+            const businessDigits = String(
+              value.metadata?.display_phone_number || '',
+            ).replace(/\D/g, '');
+            const historyChunks = value.history || [];
+            for (const chunk of historyChunks) {
+              for (const thread of chunk?.threads || []) {
+                for (const msg of thread?.messages || []) {
+                  const normalized = this.mapper.normalizeHistoryMessage(
+                    msg,
+                    businessDigits,
+                  );
+                  if (normalized) result.messages.push(normalized);
+                }
+              }
+            }
+            continue;
+          }
+
           const contacts = value.contacts || [];
           const messages = value.messages || [];
           const statuses = value.statuses || [];

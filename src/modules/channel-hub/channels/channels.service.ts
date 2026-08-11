@@ -10,6 +10,7 @@ import { PrismaService } from '../../../database/prisma.service';
 import { ChannelsRepository } from './channels.repository';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
+import { EmbeddedSignupDto } from './dto/embedded-signup.dto';
 import { ChannelAdapterRegistry } from '../channel-adapter.registry';
 import { ZappfyHttpClient } from '../adapters/zappfy/zappfy.http-client';
 import { WhatsAppOfficialHttpClient } from '../adapters/whatsapp-official/whatsapp-official.http-client';
@@ -104,6 +105,100 @@ export class ChannelsService {
             `Auto-sync enqueue failed for channel ${channel.id}: ${err.message}`,
           ),
         );
+    }
+
+    return channel;
+  }
+
+  /**
+   * Onboarding de coexistência via Embedded Signup. Recebe o `code` +
+   * `phoneNumberId` + `wabaId` do popup da Meta, troca o code por um access
+   * token de negócio, assina o app na WABA, garante os campos de webhook de
+   * coexistência e cria o canal WHATSAPP_OFFICIAL já configurado.
+   *
+   * appSecret e verifyToken vêm do App Meta (env) — compartilhados por todos
+   * os canais criados por esse fluxo, já que a assinatura dos webhooks é
+   * validada com o segredo do App.
+   */
+  async createFromEmbeddedSignup(
+    organizationId: string,
+    dto: EmbeddedSignupDto,
+    creator?: { userOrganizationId: string; role: OrgRole },
+  ) {
+    const appSecret = process.env.META_APP_SECRET;
+    const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN;
+    const apiVersion = process.env.META_GRAPH_VERSION || 'v21.0';
+    if (!appSecret) {
+      throw new BadRequestException(
+        'META_APP_SECRET não configurado no servidor — Embedded Signup indisponível.',
+      );
+    }
+
+    // 1. Troca o code por token de negócio (System User da WABA).
+    const accessToken = await this.waOfficialHttpClient.exchangeCodeForToken(
+      dto.code,
+    );
+
+    // 2. Lê nome/telefone verificados (valida token e dá um nome bom ao canal).
+    let displayPhoneNumber: string | undefined;
+    let verifiedName: string | undefined;
+    try {
+      const info = await this.waOfficialHttpClient.getPhoneNumberInfoWithToken(
+        accessToken,
+        dto.phoneNumberId,
+      );
+      displayPhoneNumber = info.displayPhoneNumber;
+      verifiedName = info.verifiedName;
+    } catch (err: any) {
+      this.logger.warn(
+        `Embedded Signup: falha ao ler phone info (${dto.phoneNumberId}): ${err.message}`,
+      );
+    }
+
+    const channelName =
+      dto.name?.trim() ||
+      verifiedName ||
+      displayPhoneNumber ||
+      'WhatsApp Oficial (Coexistência)';
+
+    // 3. Cria o canal com a config completa. verifyToken/appSecret do App.
+    const channel = await this.create(
+      organizationId,
+      {
+        type: ChannelType.WHATSAPP_OFFICIAL,
+        name: channelName,
+        config: {
+          accessToken,
+          phoneNumberId: dto.phoneNumberId,
+          businessAccountId: dto.wabaId,
+          appSecret,
+          verifyToken,
+          apiVersion,
+          coexistence: true,
+          displayPhoneNumber,
+          verifiedName,
+        },
+        ...(verifyToken ? { webhookSecret: verifyToken } : {}),
+        ...(dto.visibility ? { visibility: dto.visibility } : {}),
+      },
+      creator,
+    );
+
+    // 4. Assina explicitamente o app nos campos de coexistência (idempotente).
+    //    subscribeApp por WABA já roda no create(); aqui garantimos os campos
+    //    (message_echoes/history/...) no nível do App.
+    const appUrl = process.env.APP_URL;
+    if (appUrl && verifyToken) {
+      const callbackUrl = `${appUrl}/api/v1/webhooks/WHATSAPP_OFFICIAL`;
+      this.waOfficialHttpClient
+        .ensureAppWebhookFields(callbackUrl, verifyToken)
+        .catch((err) =>
+          this.logger.warn(`ensureAppWebhookFields falhou: ${err.message}`),
+        );
+    } else {
+      this.logger.warn(
+        'APP_URL ou META_WEBHOOK_VERIFY_TOKEN ausente — pulei inscrição automática dos campos de webhook de coexistência.',
+      );
     }
 
     return channel;

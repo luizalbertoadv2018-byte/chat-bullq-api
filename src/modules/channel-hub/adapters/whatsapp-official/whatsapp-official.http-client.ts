@@ -9,9 +9,40 @@ interface WaOfficialConfig {
   apiVersion?: string;
 }
 
+/**
+ * Campos de webhook que o app precisa assinar (objeto
+ * `whatsapp_business_account`) para o modo COEXISTÊNCIA funcionar:
+ *  - messages: inbound do cliente (padrão Cloud API)
+ *  - message_echoes / smb_message_echoes: ecos do que o dono envia PELO CELULAR
+ *  - history: sincronização das conversas antigas ao conectar (~6 meses)
+ *  - smb_app_state_sync: contatos do app sincronizados
+ *  - message_template_status_update: aprovação/reprovação de templates HSM
+ */
+const COEXISTENCE_WEBHOOK_FIELDS = [
+  'messages',
+  'smb_message_echoes',
+  'message_echoes',
+  'history',
+  'smb_app_state_sync',
+  'message_template_status_update',
+];
+
 @Injectable()
 export class WhatsAppOfficialHttpClient {
   private readonly logger = new Logger(WhatsAppOfficialHttpClient.name);
+
+  /** Config do App Meta (compartilhada entre canais criados via Embedded Signup). */
+  private getAppConfig() {
+    const appId = process.env.META_APP_ID;
+    const appSecret = process.env.META_APP_SECRET;
+    const apiVersion = process.env.META_GRAPH_VERSION || 'v21.0';
+    if (!appId || !appSecret) {
+      throw new Error(
+        'META_APP_ID / META_APP_SECRET não configurados — Embedded Signup indisponível.',
+      );
+    }
+    return { appId, appSecret, apiVersion };
+  }
 
   private getConfig(channel: Channel): WaOfficialConfig {
     const config = channel.config as Record<string, any>;
@@ -123,5 +154,108 @@ export class WhatsAppOfficialHttpClient {
         language: t.language,
         components: t.components ?? [],
       }));
+  }
+
+  // ─────────────────────────── Embedded Signup ───────────────────────────
+
+  /**
+   * Troca o `code` devolvido pelo popup de Embedded Signup por um access
+   * token de negócio (System User). O token é vinculado ao App e à WABA que
+   * o cliente selecionou/conectou no fluxo.
+   */
+  async exchangeCodeForToken(code: string): Promise<string> {
+    const { appId, appSecret, apiVersion } = this.getAppConfig();
+    try {
+      const { data } = await axios.get(
+        `https://graph.facebook.com/${apiVersion}/oauth/access_token`,
+        {
+          params: {
+            client_id: appId,
+            client_secret: appSecret,
+            code,
+          },
+          timeout: 30000,
+        },
+      );
+      if (!data?.access_token) {
+        throw new Error('Meta não retornou access_token na troca do code.');
+      }
+      return data.access_token as string;
+    } catch (error: any) {
+      const msg =
+        error.response?.data?.error?.message || error.message || 'erro desconhecido';
+      this.logger.error(`Embedded Signup token exchange falhou: ${msg}`);
+      throw new Error(`Falha ao trocar o code por token: ${msg}`);
+    }
+  }
+
+  /** Lê nome/telefone verificados a partir de um token + phoneNumberId cru. */
+  async getPhoneNumberInfoWithToken(
+    accessToken: string,
+    phoneNumberId: string,
+  ): Promise<{ displayPhoneNumber?: string; verifiedName?: string }> {
+    const { apiVersion } = this.getAppConfig();
+    const { data } = await axios.get(
+      `https://graph.facebook.com/${apiVersion}/${phoneNumberId}`,
+      {
+        params: { fields: 'display_phone_number,verified_name' },
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 30000,
+      },
+    );
+    return {
+      displayPhoneNumber: data?.display_phone_number,
+      verifiedName: data?.verified_name,
+    };
+  }
+
+  /** Assina o app na WABA usando um token cru (fluxo de onboarding). */
+  async subscribeAppWithToken(
+    accessToken: string,
+    wabaId: string,
+  ): Promise<void> {
+    const { apiVersion } = this.getAppConfig();
+    await axios.post(
+      `https://graph.facebook.com/${apiVersion}/${wabaId}/subscribed_apps`,
+      {},
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 30000,
+      },
+    );
+  }
+
+  /**
+   * Garante que o App esteja inscrito nos campos de webhook de coexistência
+   * (objeto whatsapp_business_account), apontando pra nossa callback_url.
+   * Usa o app access token (`{appId}|{appSecret}`). Idempotente na Meta.
+   * Fire-and-forget no chamador — se falhar, o dono pode configurar os campos
+   * manualmente no painel do App.
+   */
+  async ensureAppWebhookFields(callbackUrl: string, verifyToken: string): Promise<void> {
+    const { appId, appSecret, apiVersion } = this.getAppConfig();
+    try {
+      await axios.post(
+        `https://graph.facebook.com/${apiVersion}/${appId}/subscriptions`,
+        null,
+        {
+          params: {
+            object: 'whatsapp_business_account',
+            callback_url: callbackUrl,
+            verify_token: verifyToken,
+            fields: COEXISTENCE_WEBHOOK_FIELDS.join(','),
+            access_token: `${appId}|${appSecret}`,
+          },
+          timeout: 30000,
+        },
+      );
+      this.logger.log(
+        `App ${appId} inscrito nos campos de webhook de coexistência (${callbackUrl})`,
+      );
+    } catch (error: any) {
+      const msg =
+        error.response?.data?.error?.message || error.message || 'erro desconhecido';
+      this.logger.warn(`ensureAppWebhookFields falhou: ${msg}`);
+    }
   }
 }

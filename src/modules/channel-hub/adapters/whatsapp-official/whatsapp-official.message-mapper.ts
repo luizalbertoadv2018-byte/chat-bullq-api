@@ -14,25 +14,75 @@ export class WhatsAppOfficialMessageMapper {
     contact: Record<string, any>,
   ): NormalizedInboundMessage | null {
     if (!message) return null;
-
-    const result: NormalizedInboundMessage = {
-      externalMessageId: message.id,
-      externalContactId: message.from,
+    return this.build(message, {
+      isEcho: false,
+      contactId: message.from,
       contactName: contact?.profile?.name,
-      contactPhone: message.from,
+    });
+  }
+
+  /**
+   * Coexistência (smb_message_echoes): mensagem que o dono do número mandou
+   * PELO CELULAR (app WhatsApp Business) e a Meta ecoou pra manter o CRM em
+   * sincronia. Vira uma mensagem de SAÍDA (`isEcho: true`) — o pipeline
+   * inbound já cuida de gravar como OUTBOUND e não disparar bot/watchdog.
+   * O contato é o destinatário (`to`), não o `from` (que somos nós).
+   */
+  normalizeEcho(echo: Record<string, any>): NormalizedInboundMessage | null {
+    if (!echo?.to) return null;
+    return this.build(echo, { isEcho: true, contactId: echo.to });
+  }
+
+  /**
+   * Coexistência (history): mensagem antiga sincronizada ao conectar o número
+   * (até ~6 meses). Cada mensagem carrega `from`/`to` — comparamos `from` com
+   * o número do negócio pra decidir se é eco (nossa, saída) ou inbound do
+   * cliente. `businessDigits` são só os dígitos do display_phone_number.
+   */
+  normalizeHistoryMessage(
+    msg: Record<string, any>,
+    businessDigits: string,
+    contactName?: string,
+  ): NormalizedInboundMessage | null {
+    if (!msg?.id) return null;
+    const fromDigits = this.onlyDigits(msg.from);
+    const isEcho = !!businessDigits && fromDigits === businessDigits;
+    const contactId = isEcho ? msg.to : msg.from;
+    if (!contactId) return null;
+    return this.build(msg, {
+      isEcho,
+      contactId,
+      contactName: isEcho ? undefined : contactName,
+    });
+  }
+
+  private build(
+    msg: Record<string, any>,
+    opts: { isEcho: boolean; contactId: string; contactName?: string },
+  ): NormalizedInboundMessage {
+    const result: NormalizedInboundMessage = {
+      externalMessageId: msg.id,
+      externalContactId: opts.contactId,
+      contactName: opts.contactName,
+      contactPhone: opts.contactId,
       channelType: ChannelType.WHATSAPP_OFFICIAL,
-      timestamp: new Date(parseInt(message.timestamp, 10) * 1000),
-      type: this.resolveContentType(message),
-      content: this.extractContent(message),
-      isForwarded: !!message.context?.forwarded,
-      rawPayload: message,
+      timestamp: new Date(parseInt(msg.timestamp, 10) * 1000),
+      type: this.resolveContentType(msg),
+      content: this.extractContent(msg),
+      isForwarded: !!msg.context?.forwarded,
+      isEcho: opts.isEcho,
+      rawPayload: msg,
     };
 
-    if (message.context?.id) {
-      result.replyTo = { externalMessageId: message.context.id };
+    if (msg.context?.id) {
+      result.replyTo = { externalMessageId: msg.context.id };
     }
 
     return result;
+  }
+
+  private onlyDigits(value: unknown): string {
+    return value ? String(value).replace(/\D/g, '') : '';
   }
 
   normalizeStatus(status: Record<string, any>): StatusUpdate | null {
