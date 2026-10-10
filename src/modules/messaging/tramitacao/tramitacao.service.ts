@@ -84,7 +84,11 @@ export class TramitacaoService {
   private brMobile(raw: string | null | undefined): string {
     let n = (raw ?? '').replace(/\D/g, '');
     if (n.length > 11 && n.startsWith('55')) n = n.slice(2);
-    return n.slice(-11);
+    n = n.slice(-11);
+    // DDD + 8 dígitos começando em 6-9 é celular sem o nono dígito (número
+    // antigo ou como o WhatsApp entrega em parte do país): a API recusa.
+    if (n.length === 10 && /[6-9]/.test(n[2])) n = `${n.slice(0, 2)}9${n.slice(2)}`;
+    return n;
   }
 
   private async api<T = any>(
@@ -259,9 +263,17 @@ export class TramitacaoService {
       if (status !== 422 || !hasExtras) return null;
       const slim: Record<string, unknown> = {};
       for (const k of essential) if (fields[k]) slim[k] = fields[k];
-      const retry = await this.api('POST', '/clientes', {
+      let retry = await this.api('POST', '/clientes', {
         customer: { ...slim, customer_type: customerType },
       });
+      // Telefone ou e-mail fora do padrão também não pode barrar: última
+      // tentativa só com nome e CPF.
+      if (retry.status === 422 && (slim.phone_mobile || slim.email)) {
+        const { phone_mobile: _p, email: _e, ...bare } = slim;
+        retry = await this.api('POST', '/clientes', {
+          customer: { ...bare, customer_type: customerType },
+        });
+      }
       id =
         retry.data &&
         (retry.data.customer ? retry.data.customer.id : retry.data.id);

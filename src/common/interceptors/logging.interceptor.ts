@@ -20,7 +20,12 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap(() => {
         const response = context.switchToHttp().getResponse();
-        this.logger.log(`${method} ${url} ${response.statusCode} ${Date.now() - now}ms`);
+        // O segredo do webhook da ZapSign vai no path: não pode ir pro log.
+        const safeUrl = String(url).replace(
+          /(\/webhooks\/zapsign\/)[^/?]+/,
+          '$1***',
+        );
+        this.logger.log(`${method} ${safeUrl} ${response.statusCode} ${Date.now() - now}ms`);
       }),
     );
   }

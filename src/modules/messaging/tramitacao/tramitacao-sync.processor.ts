@@ -6,6 +6,12 @@ import { MediaResolverService } from '../messages/media-resolver.service';
 import { TramitacaoService, TramCadastro } from './tramitacao.service';
 import { GmailSendService } from './gmail-send.service';
 import { PipelinesService } from '../../pipelines/pipelines.service';
+import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import {
+  MessageContentType,
+  MessageDirection,
+  MessageStatus,
+} from '@prisma/client';
 
 /**
  * A fila `tramitacao-sync` carrega os tipos de trabalho abaixo. **NADA vai pro
@@ -61,6 +67,8 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     private readonly gmail: GmailSendService,
     private readonly pipelines: PipelinesService,
     @InjectQueue('tramitacao-sync') private readonly queue: Queue,
+    @InjectQueue('outbound-messages') private readonly outboundQueue: Queue,
+    private readonly realtime: RealtimeGateway,
   ) {
     super();
   }
@@ -156,7 +164,104 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       );
       return { skipped: 'no-contact-for-doc' };
     }
+    await this.askDocumentsAfterSignature(contact);
     return this.releaseContact(contact, 'assinatura');
+  }
+
+  /**
+   * Muita gente assina e não avisa — e o agente só fala quando o cliente
+   * escreve, então o atendimento morria com a ficha assinada. Se ninguém falou
+   * nada depois do link da ficha, pedimos o primeiro documento aqui. Se o
+   * cliente já avisou ("assinei"), o agente já seguiu e não duplicamos.
+   * Nunca derruba a liberação: falha aqui só fica no log.
+   */
+  private async askDocumentsAfterSignature(
+    contact: import('@prisma/client').Contact,
+  ): Promise<void> {
+    try {
+      const conversation = await this.prisma.conversation.findFirst({
+        where: { contactId: contact.id, deletedAt: null, isGroup: false },
+        orderBy: { lastMessageAt: 'desc' },
+        include: { activeAgent: { select: { id: true, name: true } } },
+      });
+      if (!conversation) return;
+
+      const last = await this.prisma.message.findFirst({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      const lastText = String((last?.content as any)?.text ?? '');
+      if (
+        !last ||
+        last.direction !== MessageDirection.OUTBOUND ||
+        !/zapsign\.com\.br/i.test(lastText)
+      ) {
+        return;
+      }
+
+      const contactChannel = await this.prisma.contactChannel.findFirst({
+        where: { contactId: contact.id, channelId: conversation.channelId },
+        select: { externalId: true },
+      });
+      if (!contactChannel?.externalId) return;
+
+      const meta = (contact.metadata ?? {}) as Record<string, any>;
+      const fullName: string =
+        meta.pendingCadastro?.cadastro?.name ?? contact.name ?? '';
+      const firstName = fullName.trim().split(/\s+/)[0] ?? '';
+      const text = `Recebi a sua ficha assinada${firstName ? `, ${firstName}` : ''}! Agora me envia uma foto do seu RG ou CNH, frente e verso?`;
+
+      const message = await this.prisma.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: MessageDirection.OUTBOUND,
+          type: MessageContentType.TEXT,
+          content: { text },
+          status: MessageStatus.QUEUED,
+          senderName: conversation.activeAgent?.name ?? 'AI',
+          metadata: {
+            auto: 'pos-assinatura',
+            ...(conversation.activeAgent
+              ? { aiAgentId: conversation.activeAgent.id }
+              : {}),
+          },
+        },
+      });
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { lastMessageAt: new Date() },
+      });
+      this.realtime.emitToChannel(conversation.channelId, 'message:new', {
+        message,
+        conversationId: conversation.id,
+        contactId: contact.id,
+      });
+      this.realtime.emitToConversation(conversation.id, 'message:new', {
+        message,
+      });
+      await this.outboundQueue.add(
+        'send-outbound',
+        {
+          messageId: message.id,
+          channelId: conversation.channelId,
+          contactExternalId: contactChannel.externalId,
+          message: { type: MessageContentType.TEXT, content: { text } },
+        },
+        {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5_000 },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      );
+      this.logger.log(
+        `pós-assinatura: pedido de documentos enviado (conv ${conversation.id})`,
+      );
+    } catch (err: any) {
+      this.logger.warn(
+        `pós-assinatura: não enviou o pedido de documentos p/ contato ${contact.id}: ${err?.message ?? err}`,
+      );
+    }
   }
 
   /** Liberação MANUAL pelo operador (cliente presencial que não assina). */
