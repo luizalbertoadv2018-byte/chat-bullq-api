@@ -21,6 +21,20 @@ async function bootstrap() {
   app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
   app.setGlobalPrefix('api/v1');
 
+  // Webhooks de canal podem trazer a mídia embutida em base64 (Evolution manda
+  // a foto/áudio/documento dentro do JSON), o que estoura o limite padrão de
+  // 100kb e derrubava a mensagem com 413. Limite maior só nesta rota; o
+  // `verify` mantém o rawBody que a validação de assinatura dos canais usa.
+  app.use(
+    '/api/v1/webhooks',
+    express.json({
+      limit: '50mb',
+      verify: (req, _res, buf) => {
+        (req as any).rawBody = buf;
+      },
+    }),
+  );
+
   // Serve locally-stored user uploads (audio, etc.) before the global prefix
   // kicks in. This is set up pre-prefix so the path matches both in dev and
   // behind the reverse-proxy.
