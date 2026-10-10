@@ -245,10 +245,32 @@ export class TramitacaoService {
     const { status, data } = await this.api('POST', '/clientes', {
       customer: { ...fields, customer_type: customerType },
     });
-    const id = data && (data.customer ? data.customer.id : data.id);
+    let id = data && (data.customer ? data.customer.id : data.id);
     if (status >= 300 || !id) {
-      this.logger.warn(`Tramitação: criar registro falhou (${status})`);
-      return null;
+      this.logger.warn(
+        `Tramitação: criar registro falhou (${status}): ${JSON.stringify(data?.errors ?? data ?? '').slice(0, 300)}`,
+      );
+      // Um campo opcional fora do padrão não pode custar o cadastro: refaz só
+      // com o essencial e o restante é completado à mão no Tramitação.
+      const essential = ['name', 'cpf_cnpj', 'phone_mobile', 'email'];
+      const hasExtras = Object.keys(fields).some(
+        (k) => !essential.includes(k) && k !== 'customer_type',
+      );
+      if (status !== 422 || !hasExtras) return null;
+      const slim: Record<string, unknown> = {};
+      for (const k of essential) if (fields[k]) slim[k] = fields[k];
+      const retry = await this.api('POST', '/clientes', {
+        customer: { ...slim, customer_type: customerType },
+      });
+      id =
+        retry.data &&
+        (retry.data.customer ? retry.data.customer.id : retry.data.id);
+      if (retry.status >= 300 || !id) {
+        this.logger.warn(
+          `Tramitação: criar registro (só essencial) falhou (${retry.status}): ${JSON.stringify(retry.data?.errors ?? '').slice(0, 300)}`,
+        );
+        return null;
+      }
     }
     const email = await this.ensureEmail(id);
     const cust: TramCustomer = { id, email, name: (fields.name as string) ?? null };
@@ -340,7 +362,7 @@ export class TramitacaoService {
       const pm = this.brMobile(cad.phone);
       if (pm) f.phone_mobile = pm;
     }
-    put('marital_status', cad.maritalStatus);
+    put('marital_status', cad.maritalStatus?.toLowerCase());
     put('profession', cad.profession);
     put('rg_numero', cad.rg);
     put('birthdate', cad.birthdate);
@@ -348,7 +370,9 @@ export class TramitacaoService {
     put('street_number', cad.streetNumber);
     put('neighborhood', cad.neighborhood);
     put('city', cad.city);
-    put('state', cad.state);
+    // A API só aceita a sigla (UF); nome por extenso volta 422 e derrubava
+    // o cadastro inteiro. Estado que não reconhecemos fica de fora.
+    put('state', toUf(cad.state));
     put('zipcode', cad.zipcode);
     return f;
   }
@@ -426,4 +450,32 @@ export class TramitacaoService {
     }
     return customer;
   }
+}
+
+const UF_BY_NAME: Record<string, string> = {
+  acre: 'AC', alagoas: 'AL', amapa: 'AP', amazonas: 'AM', bahia: 'BA',
+  ceara: 'CE', 'distrito federal': 'DF', 'espirito santo': 'ES', goias: 'GO',
+  maranhao: 'MA', 'mato grosso': 'MT', 'mato grosso do sul': 'MS',
+  'minas gerais': 'MG', para: 'PA', paraiba: 'PB', parana: 'PR',
+  pernambuco: 'PE', piaui: 'PI', 'rio de janeiro': 'RJ',
+  'rio grande do norte': 'RN', 'rio grande do sul': 'RS', rondonia: 'RO',
+  roraima: 'RR', 'santa catarina': 'SC', 'sao paulo': 'SP', sergipe: 'SE',
+  tocantins: 'TO',
+};
+
+/** "Sergipe" / "estado de sergipe" / "se" → "SE". Null se não reconhecer. */
+function toUf(state: string | null | undefined): string | null {
+  const raw = (state ?? '').trim();
+  if (!raw) return null;
+  const norm = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/^estado d[eoa] /, '')
+    .trim();
+  if (norm.length === 2) {
+    const uf = norm.toUpperCase();
+    return Object.values(UF_BY_NAME).includes(uf) ? uf : null;
+  }
+  return UF_BY_NAME[norm] ?? null;
 }
