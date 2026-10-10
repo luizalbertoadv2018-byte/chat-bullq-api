@@ -39,13 +39,14 @@ import { sanitizeAssistantText } from './text-guards';
 import { MediaUrlResolverService } from './media-url-resolver.service';
 import { ThemeCardService } from './theme-card.service';
 
-// Corte de custo (2026-08-07): cada iteração e cada mensagem do histórico é
-// reenviada e RE-COBRADA a cada chamada ao LLM. Reduzir os dois derruba o
-// custo por turno. 4 iterações cobrem quase todo turno real (raramente > 3
-// tools encadeadas); 10 mensagens dão contexto suficiente pra atendimento
-// (o essencial de longo prazo já vive na memória do contato).
+// Cada iteração e cada mensagem do histórico é reenviada e RE-COBRADA a cada
+// chamada ao LLM. 4 iterações cobrem quase todo turno real (raramente > 3
+// tools encadeadas). O histórico já foi 10 (corte de custo de 2026-08-07),
+// mas um funil completo (triagem → proposta → ficha → documentos) passa
+// disso: quando a ficha saía da janela o agente "esquecia" que ela existia e
+// recomeçava o atendimento do zero. 40 cobre o funil inteiro.
 const MAX_TOOL_ITERATIONS = 4;
-const MAX_RECENT_MESSAGES = 10;
+const MAX_RECENT_MESSAGES = 40;
 
 /**
  * Acima desta confiança, mensagens classificadas como SPAM_OR_NOISE são
