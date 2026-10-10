@@ -7,6 +7,7 @@ import { ZappfyHttpClient } from './zappfy.http-client';
 import { ZappfySyncAdapter } from './zappfy.sync-adapter';
 import { ZappfyContactEnricherService } from './zappfy-contact-enricher.service';
 import { MessagingModule } from '../../../messaging/messaging.module';
+import { EvolutionModule } from '../evolution/evolution.module';
 import { AvatarHydrationProcessor } from '../../avatars/avatar-hydration.processor';
 import { AVATAR_HYDRATION_QUEUE } from '../../avatars/avatar-hydration.constants';
 
@@ -17,6 +18,8 @@ import { AVATAR_HYDRATION_QUEUE } from '../../avatars/avatar-hydration.constants
     // channel-hub ↔ messaging).
     forwardRef(() => MessagingModule),
     BullModule.registerQueue({ name: AVATAR_HYDRATION_QUEUE }),
+    // O AvatarHydrationProcessor atende os dois providers de WhatsApp.
+    EvolutionModule,
   ],
   providers: [
     ZappfyInboundAdapter,

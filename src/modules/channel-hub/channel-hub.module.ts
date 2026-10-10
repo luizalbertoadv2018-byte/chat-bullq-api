@@ -70,6 +70,7 @@ import { WebhookThrottleGuard } from './webhook-throttle.guard';
     WebhookEventsService,
     InstagramModule,
     ZappfyModule,
+    EvolutionModule,
     GmailModule,
   ],
 })

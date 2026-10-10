@@ -9,6 +9,7 @@ import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { NormalizedInboundMessage, StatusUpdate } from '../../channel-hub/ports/types';
 import { InstagramContactEnricherService } from '../../channel-hub/adapters/instagram/instagram-contact-enricher.service';
 import { ZappfyContactEnricherService } from '../../channel-hub/adapters/zappfy/zappfy-contact-enricher.service';
+import { EvolutionContactEnricherService } from '../../channel-hub/adapters/evolution/evolution-contact-enricher.service';
 import { WebhookEventsService } from '../../channel-hub/webhook-events.service';
 import { AgentRouterService } from '../../ai-agents/router/agent-router.service';
 import { AiAgentRunnerService } from '../../ai-agents/runner/agent-runner.service';
@@ -104,6 +105,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly realtimeGateway: RealtimeGateway,
     private readonly instagramEnricher: InstagramContactEnricherService,
     private readonly zappfyEnricher: ZappfyContactEnricherService,
+    private readonly evolutionEnricher: EvolutionContactEnricherService,
     private readonly webhookEvents: WebhookEventsService,
     private readonly agentRouter: AgentRouterService,
     private readonly agentRunner: AiAgentRunnerService,
@@ -200,6 +202,21 @@ export class InboundMessageProcessor extends WorkerHost {
             .enrich(channel, message.externalContactId)
             .catch((err) =>
               this.logger.warn(`Zappfy enrichment failed: ${err.message}`),
+            );
+        }
+      }
+
+      // WhatsApp via Evolution: o enricher decide sozinho se a foto local
+      // ainda vale, então basta chamar. Fire-and-forget, como acima.
+      if (message.channelType === ChannelType.WHATSAPP_EVOLUTION) {
+        const channel = await this.prisma.channel.findUnique({
+          where: { id: channelId },
+        });
+        if (channel) {
+          this.evolutionEnricher
+            .enrich(channel, message.externalContactId)
+            .catch((err) =>
+              this.logger.warn(`Evolution enrichment failed: ${err.message}`),
             );
         }
       }

@@ -152,6 +152,31 @@ export class EvolutionHttpClient {
   }
 
   /**
+   * URL da foto de perfil de um contato ou grupo (aceita número ou JID).
+   * `null` quando não há foto ou a privacidade do contato esconde.
+   */
+  async fetchProfilePictureUrl(
+    channel: Channel,
+    numberOrJid: string,
+  ): Promise<string | null> {
+    const cfg = this.cfg(channel);
+    const res = await this.client(cfg).post(
+      `/chat/fetchProfilePictureUrl/${encodeURIComponent(cfg.instance)}`,
+      { number: numberOrJid },
+    );
+    return res.data?.profilePictureUrl || null;
+  }
+
+  /** Baixa os bytes de uma URL pública de mídia (ex.: foto em pps.whatsapp.net). */
+  async getMediaBuffer(mediaUrl: string): Promise<Buffer> {
+    const response = await axios.get(mediaUrl, {
+      responseType: 'arraybuffer',
+      timeout: 60000,
+    });
+    return Buffer.from(response.data);
+  }
+
+  /**
    * Baixa a mídia de uma mensagem inbound como base64 (o WhatsApp entrega a
    * URL criptografada .enc que o browser não abre). Retorna um data URI
    * "playável" que a nossa camada de mídia re-hospeda.

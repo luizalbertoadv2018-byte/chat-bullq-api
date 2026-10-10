@@ -35,6 +35,7 @@ import {
   type AvatarHydrationJob,
 } from '../../channel-hub/avatars/avatar-hydration.constants';
 import { ZappfyContactEnricherService } from '../../channel-hub/adapters/zappfy/zappfy-contact-enricher.service';
+import { UploadsService } from '../messages/uploads.service';
 
 const SYNC_MESSAGE_PAGE_SIZE = 50;
 const SYNC_MAX_PAGES = 4;
@@ -68,6 +69,7 @@ export class ConversationsService {
     private readonly zappfyHttp: ZappfyHttpClient,
     private readonly contactEnricher: ZappfyContactEnricherService,
     private readonly llm: LlmService,
+    private readonly uploads: UploadsService,
     @InjectQueue(AVATAR_HYDRATION_QUEUE)
     private readonly avatarQueue: Queue<AvatarHydrationJob>,
   ) {}
@@ -90,6 +92,9 @@ export class ConversationsService {
       // as vagas para sempre — a fila entregaria as primeiras dez e travava.
       // Por isso descartamos aqui quem já foi consultado nas últimas 24h,
       // o mesmo prazo que o enricher usa: assim cada rodada anda para frente.
+      // URL que não é do nosso storage veio de outro ambiente (localhost,
+      // túnel antigo) e não abre mais: conta como sem foto.
+      const avatarPrefix = `${this.uploads.avatarBaseUrl}%`;
       const pending = await this.prisma.$queryRaw<
         Array<{ channel_id: string; external_id: string }>
       >`
@@ -101,10 +106,11 @@ export class ConversationsService {
         JOIN channels ch ON ch.id = conv.channel_id
         WHERE conv.organization_id = ${organizationId}
           AND conv.deleted_at IS NULL
-          AND ch.type = 'WHATSAPP_ZAPPFY'
+          AND ch.type IN ('WHATSAPP_ZAPPFY', 'WHATSAPP_EVOLUTION')
           AND ch.deleted_at IS NULL
+          AND ch.is_active = true
           AND ct.deleted_at IS NULL
-          AND ct.avatar_url IS NULL
+          AND (ct.avatar_url IS NULL OR ct.avatar_url NOT LIKE ${avatarPrefix})
           AND (
             ct.metadata->>'avatarCheckedAt' IS NULL
             OR (ct.metadata->>'avatarCheckedAt') < to_char(
@@ -399,7 +405,13 @@ export class ConversationsService {
         where: { id: conversation.channelId, deletedAt: null },
         select: { id: true, type: true },
       });
-      if (!channel || channel.type !== ChannelType.WHATSAPP_ZAPPFY) return;
+      if (
+        !channel ||
+        (channel.type !== ChannelType.WHATSAPP_ZAPPFY &&
+          channel.type !== ChannelType.WHATSAPP_EVOLUTION)
+      ) {
+        return;
+      }
 
       await this.avatarQueue.add(
         'hydrate',

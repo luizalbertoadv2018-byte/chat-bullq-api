@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { ChannelType } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
 import { ZappfyContactEnricherService } from '../adapters/zappfy/zappfy-contact-enricher.service';
+import { EvolutionContactEnricherService } from '../adapters/evolution/evolution-contact-enricher.service';
 import {
   AVATAR_HYDRATION_QUEUE,
   type AvatarHydrationJob,
@@ -23,6 +24,7 @@ export class AvatarHydrationProcessor extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly enricher: ZappfyContactEnricherService,
+    private readonly evolutionEnricher: EvolutionContactEnricherService,
   ) {
     super();
   }
@@ -33,9 +35,16 @@ export class AvatarHydrationProcessor extends WorkerHost {
     const channel = await this.prisma.channel.findFirst({
       where: { id: channelId, deletedAt: null },
     });
-    if (!channel || channel.type !== ChannelType.WHATSAPP_ZAPPFY) return;
+    if (!channel) return;
 
-    await this.enricher.enrich(channel, externalContactId, { force, maxAgeDays });
+    if (channel.type === ChannelType.WHATSAPP_ZAPPFY) {
+      await this.enricher.enrich(channel, externalContactId, { force, maxAgeDays });
+    } else if (channel.type === ChannelType.WHATSAPP_EVOLUTION) {
+      await this.evolutionEnricher.enrich(channel, externalContactId, {
+        force,
+        maxAgeDays,
+      });
+    }
   }
 
   async onFailed(job: Job<AvatarHydrationJob>, err: Error): Promise<void> {

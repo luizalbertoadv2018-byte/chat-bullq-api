@@ -143,6 +143,11 @@ export class UploadsService {
     return `${this.publicBaseUrl}/avatars/${filename}?v=${version}`;
   }
 
+  /** Prefixo de toda URL de avatar servida por este storage. */
+  get avatarBaseUrl(): string {
+    return `${this.publicBaseUrl}/avatars/`;
+  }
+
   /**
    * Idade em dias do arquivo por trás de uma URL de avatar, ou `null` se ele
    * não existe (nunca baixado, ou perdido num redeploy). Serve de "quando
