@@ -17,6 +17,7 @@ import {
   LlmUsage,
 } from './llm.types';
 import { LLM_CONVERSATION_MODEL, LLM_SIMPLE_MODEL } from './llm.constants';
+import { ClaudeClient } from './claude.client';
 
 /**
  * Preço por 1M tokens (USD) — APROXIMADO, só p/ registrar custo interno
@@ -91,6 +92,7 @@ export class LlmService {
   private readonly hasApiKey: boolean;
   private readonly timeoutMs: number;
   private readonly endpoint = 'https://api.openai.com/v1/chat/completions';
+  private readonly claude: ClaudeClient | null;
 
   constructor(config: ConfigService) {
     const apiKey =
@@ -106,9 +108,27 @@ export class LlmService {
         'OPENAI_API_KEY not set — AI agents will fail at runtime',
       );
     }
+
+    // Agentes com modelId `claude-*` vão direto pra Anthropic quando a chave
+    // existe; sem ela, seguem remapeados p/ OpenAI em normalizeModelId.
+    const anthropicKey =
+      config.get<string>('ANTHROPIC_API_KEY') ??
+      process.env.ANTHROPIC_API_KEY ??
+      '';
+    this.claude = anthropicKey
+      ? new ClaudeClient(anthropicKey, this.timeoutMs)
+      : null;
   }
 
   async complete(req: LlmCompletionRequest): Promise<LlmCompletionResponse> {
+    const claudeModel = this.claudeModelId(req.modelId);
+    if (this.claude && claudeModel) {
+      return this.claude.complete(
+        { ...req, modelId: claudeModel },
+        req.tools ? this.sanitizeTools(req.tools) : undefined,
+      );
+    }
+
     if (!this.hasApiKey) {
       throw new InternalServerErrorException('OPENAI_API_KEY not set');
     }
@@ -243,6 +263,13 @@ export class LlmService {
       `modelId desconhecido "${raw}" — usando ${LLM_CONVERSATION_MODEL}`,
     );
     return LLM_CONVERSATION_MODEL;
+  }
+
+  /** ID Claude (sem o prefixo `anthropic/`), ou null se o modelo não é Claude. */
+  private claudeModelId(id: string): string | null {
+    const raw = (id ?? '').trim();
+    const t = raw.startsWith('anthropic/') ? raw.slice('anthropic/'.length) : raw;
+    return /^claude-/i.test(t) ? t : null;
   }
 
   /** Modelos de raciocínio: gpt-5 e o-series ("pensam" antes de responder). */
