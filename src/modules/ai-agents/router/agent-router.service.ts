@@ -78,6 +78,26 @@ export class AgentRouterService {
       }
     }
 
+    // 1.2. Canal dedicado: se o canal tem UM único agent autônomo vinculado,
+    //      é ele quem atende — sem keyword (que é da org inteira e levaria o
+    //      lead pro funil de outro nicho) e sem classifier (cujos intents não
+    //      conhecem o nicho e descartavam lead legítimo como spam).
+    const dedicated = await this.soleAgentForChannel(conversation.channelId);
+    if (dedicated) {
+      this.logger.log({
+        msg: 'agent_selected_via_dedicated_channel',
+        agentName: dedicated.name,
+      });
+      return {
+        agentId: dedicated.id,
+        agentName: dedicated.name,
+        classifiedIntent: null,
+        classifierConfidence: null,
+        skippedOrchestrator: true,
+        classifierCostUsd: 0,
+      };
+    }
+
     // 1.5. Atalho determinístico por palavra-chave. Se a mensagem casa com
     //      as triggerKeywords de algum agent ativo da org, roteia DIRETO
     //      pra ele — sem gastar chamada de LLM no classifier. Match mais
@@ -229,6 +249,22 @@ export class AgentRouterService {
     return best
       ? { agentId: best.agentId, agentName: best.agentName, keyword: best.keyword }
       : null;
+  }
+
+  /** O agent do canal, quando há exatamente um autônomo ativo vinculado a ele. */
+  private async soleAgentForChannel(
+    channelId: string,
+  ): Promise<{ id: string; name: string } | null> {
+    const links = await this.prisma.aiAgentChannel.findMany({
+      where: {
+        channelId,
+        mode: 'AUTONOMOUS',
+        agent: { isActive: true, deletedAt: null },
+      },
+      select: { agent: { select: { id: true, name: true } } },
+      take: 2,
+    });
+    return links.length === 1 ? links[0].agent : null;
   }
 
   private async fallbackToOrchestrator(
