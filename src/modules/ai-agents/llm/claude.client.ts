@@ -21,6 +21,9 @@ const PRICING: Record<string, { in: number; out: number }> = {
   'claude-opus-5-5': { in: 4, out: 20 },
   'claude-sonnet-5-5': { in: 2, out: 10 },
   'claude-haiku-4-5': { in: 1, out: 5 },
+  // Faixa de prompts até 100k tokens (acima disso a Anthropic cobra 5x; os
+  // prompts dos agentes ficam muito abaixo).
+  'claude-haiku-5-5': { in: 0.1, out: 0.5 },
 };
 
 const VISION_MEDIA_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const;
