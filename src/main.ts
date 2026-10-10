@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -12,7 +13,9 @@ import { ResponseInterceptor } from './common/interceptors/response.interceptor'
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   const config = app.get(ConfigService);
   const logger = new Logger('Bootstrap');
 
@@ -23,17 +26,10 @@ async function bootstrap() {
 
   // Webhooks de canal podem trazer a mídia embutida em base64 (Evolution manda
   // a foto/áudio/documento dentro do JSON), o que estoura o limite padrão de
-  // 100kb e derrubava a mensagem com 413. Limite maior só nesta rota; o
-  // `verify` mantém o rawBody que a validação de assinatura dos canais usa.
-  app.use(
-    '/api/v1/webhooks',
-    express.json({
-      limit: '50mb',
-      verify: (req, _res, buf) => {
-        (req as any).rawBody = buf;
-      },
-    }),
-  );
+  // 100kb e derrubava a mensagem com 413. Tem que ser via useBodyParser: um
+  // express.json() registrado à mão faz o Nest NÃO registrar o parser global
+  // e todas as outras rotas passam a receber body vazio.
+  app.useBodyParser('json', { limit: '50mb' });
 
   // Serve locally-stored user uploads (audio, etc.) before the global prefix
   // kicks in. This is set up pre-prefix so the path matches both in dev and
