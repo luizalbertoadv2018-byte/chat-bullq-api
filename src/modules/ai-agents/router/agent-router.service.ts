@@ -8,6 +8,7 @@ import type {
   ClassifierMessage,
 } from '../classifier/intent.types';
 import { IntentType } from '../classifier/intent.types';
+import { OwnerAlertService } from '../../owner-alerts/owner-alert.service';
 
 interface BusinessHoursDay {
   enabled: boolean;
@@ -42,6 +43,7 @@ export class AgentRouterService {
     private readonly prisma: PrismaService,
     private readonly classifier: IntentClassifierService,
     private readonly intentRouter: IntentRouterService,
+    private readonly ownerAlerts: OwnerAlertService,
   ) {}
 
   /**
@@ -328,6 +330,21 @@ export class AgentRouterService {
     // query: conversa de grupo simplesmente não aciona agente.
     if (conversation.isGroup) {
       return { handle: false, reason: 'group-conversation' };
+    }
+
+    // Quem recebe os avisos do escritório não é lead: se responder no chat
+    // do aviso, a IA não atende.
+    const alertContact = await this.prisma.contact.findUnique({
+      where: { id: conversation.contactId },
+      select: { phone: true },
+    });
+    if (
+      await this.ownerAlerts.isAlertPhone(
+        conversation.organizationId,
+        alertContact?.phone,
+      )
+    ) {
+      return { handle: false, reason: 'owner-alert-number' };
     }
 
     // Hierarquia de override (mais específico ganha):

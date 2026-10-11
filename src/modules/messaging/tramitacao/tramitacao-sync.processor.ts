@@ -7,6 +7,7 @@ import { TramitacaoService, TramCadastro } from './tramitacao.service';
 import { GmailSendService } from './gmail-send.service';
 import { PipelinesService } from '../../pipelines/pipelines.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
+import { OwnerAlertService } from '../../owner-alerts/owner-alert.service';
 import {
   MessageContentType,
   MessageDirection,
@@ -69,6 +70,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     @InjectQueue('tramitacao-sync') private readonly queue: Queue,
     @InjectQueue('outbound-messages') private readonly outboundQueue: Queue,
     private readonly realtime: RealtimeGateway,
+    private readonly ownerAlerts: OwnerAlertService,
   ) {
     super();
   }
@@ -165,6 +167,16 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       return { skipped: 'no-contact-for-doc' };
     }
     await this.askDocumentsAfterSignature(contact);
+    void this.ownerAlerts.notifyAboutContact(
+      contact.organizationId,
+      {
+        name:
+          (contact.metadata as any)?.pendingCadastro?.cadastro?.name ??
+          contact.name,
+        phone: contact.phone,
+      },
+      '✅ Ficha assinada',
+    );
     return this.releaseContact(contact, 'assinatura');
   }
 

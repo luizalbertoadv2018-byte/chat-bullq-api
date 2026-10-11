@@ -15,6 +15,7 @@ import type {
 } from './confirmation.types';
 import { PendingActionStorage } from './pending-action.storage';
 import { PENDING_ACTION_EXECUTOR_QUEUE } from './queue-names';
+import { OwnerAlertService } from '../../owner-alerts/owner-alert.service';
 
 /**
  * Service that owns the lifecycle of `PendingAction` records.
@@ -32,6 +33,7 @@ export class PendingActionService {
     private readonly storage: PendingActionStorage,
     @InjectQueue(PENDING_ACTION_EXECUTOR_QUEUE)
     private readonly executorQueue: Queue,
+    private readonly ownerAlerts: OwnerAlertService,
   ) {}
 
   /** Create a new PENDING action for human review. */
@@ -54,6 +56,16 @@ export class PendingActionService {
     };
 
     await this.storage.save(action);
+
+    // Pedido de humano não pode depender de alguém estar olhando o painel.
+    if (action.toolName === 'transferToHuman') {
+      const reason = String((action.args as any)?.reason ?? '').trim();
+      void this.ownerAlerts.notifyAboutConversation(
+        action.conversationId,
+        '🔔 Lead pedindo atendimento humano',
+        reason ? `Motivo: ${reason}` : undefined,
+      );
+    }
 
     this.logger.log({
       msg: 'pending_action_created',

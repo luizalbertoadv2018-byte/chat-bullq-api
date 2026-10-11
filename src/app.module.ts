@@ -28,6 +28,7 @@ import { SegmentsModule } from './modules/segments/segments.module';
 import { ProjectsModule } from './modules/projects/projects.module';
 import { SalesRecoveryModule } from './modules/sales-recovery/sales-recovery.module';
 import { TasksModule } from './modules/tasks/tasks.module';
+import { OwnerAlertsModule } from './modules/owner-alerts/owner-alerts.module';
 import { AutomationsModule } from './modules/automations/automations.module';
 // ProductsModule removido — catálogo agora vive no Trivapp e é consumido
 // via skill HTTP getProductPitch + CatalogSyncService. Tabela `products`
@@ -48,6 +49,7 @@ import redisConfig from './config/redis.config';
       }),
     }),
     PrismaModule,
+    OwnerAlertsModule,
     // AutomationsModule is @Global — register early so every domain
     // module can inject OutboxService without explicit imports.
     AutomationsModule,
