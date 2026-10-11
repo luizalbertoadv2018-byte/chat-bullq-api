@@ -8,6 +8,7 @@ import { GmailSendService } from './gmail-send.service';
 import { PipelinesService } from '../../pipelines/pipelines.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { OwnerAlertService } from '../../owner-alerts/owner-alert.service';
+import { ClientGroupService } from '../../owner-alerts/client-group.service';
 import {
   MessageContentType,
   MessageDirection,
@@ -71,6 +72,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     @InjectQueue('outbound-messages') private readonly outboundQueue: Queue,
     private readonly realtime: RealtimeGateway,
     private readonly ownerAlerts: OwnerAlertService,
+    private readonly clientGroups: ClientGroupService,
   ) {
     super();
   }
@@ -177,7 +179,13 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       },
       '✅ Ficha assinada',
     );
-    return this.releaseContact(contact, 'assinatura');
+    const signedName: string | undefined = (contact.metadata as any)
+      ?.pendingCadastro?.cadastro?.name;
+    const result = await this.releaseContact(contact, 'assinatura');
+    // Depois da liberação (que regrava o metadata do contato): grupo de
+    // contingência com o cliente e a equipe.
+    await this.clientGroups.ensureForContact(contact.id, signedName);
+    return result;
   }
 
   /**
