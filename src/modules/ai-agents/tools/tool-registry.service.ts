@@ -21,6 +21,7 @@ import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
 import { MoverNoFunilTool } from './builtin/mover-no-funil.tool';
 import { ChecklistDocumentosTool } from './builtin/checklist-documentos.tool';
 import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
+import { EnviarMensagemProntaTool } from './builtin/enviar-mensagem-pronta.tool';
 
 /**
  * Registry of BUILT-IN skills (named "tools" in the code for legacy reasons).
@@ -61,8 +62,12 @@ export class ToolRegistry {
     moverNoFunil: MoverNoFunilTool,
     checklistDocumentos: ChecklistDocumentosTool,
     enviarDocumentoAssinatura: EnviarDocumentoAssinaturaTool,
+    enviarMensagemPronta: EnviarMensagemProntaTool,
   ) {
     this.register(reply, ['ORCHESTRATOR', 'WORKER']);
+    // Material pronto do painel (imagem/arquivo/texto) — único jeito do agente
+    // mandar mídia.
+    this.register(enviarMensagemPronta, ['ORCHESTRATOR', 'WORKER']);
     this.register(transfer, ['ORCHESTRATOR', 'WORKER']);
     this.register(tag, ['ORCHESTRATOR', 'WORKER']);
     // Delegação: ORCHESTRATOR e WORKER. Liberar pro WORKER permite o
