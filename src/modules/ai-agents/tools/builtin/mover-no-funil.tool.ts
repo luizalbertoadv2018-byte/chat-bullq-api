@@ -2,11 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { PipelinesService } from '../../../pipelines/pipelines.service';
 
-const ETAPAS = ['Em Análise', 'Qualificado', 'Desqualificado'] as const;
+const ETAPAS = [
+  'Em Análise',
+  'Proposta Enviada',
+  'Qualificado',
+  'Desqualificado',
+] as const;
 
 /**
  * Permite ao agente mover o card desta conversa no funil do tema — a decisão
  * de QUALIFICAÇÃO do lead. Só as etapas comerciais iniciais ficam aqui:
+ *   - "Proposta Enviada": o agente acabou de apresentar a proposta de
+ *     honorários e aguarda o aceite (só anda em funil que tenha essa etapa).
  *   - "Qualificado": o lead tem caso e quer seguir.
  *   - "Desqualificado": não tem caso, não é o benefício, ou desistiu.
  *   - "Em Análise": ainda avaliando situação/documentos.
@@ -20,7 +27,8 @@ export class MoverNoFunilTool implements AiTool {
   readonly name = 'moverNoFunil';
   readonly description =
     'Move o card desta conversa no funil do tema (qualificação do lead). ' +
-    'Use "Qualificado" quando o lead TEM caso e quer seguir; "Desqualificado" quando NÃO tem caso, ' +
+    'Use "Proposta Enviada" logo depois de apresentar a proposta de honorários ao lead; ' +
+    '"Qualificado" quando o lead TEM caso e quer seguir (aceitou a proposta); "Desqualificado" quando NÃO tem caso, ' +
     'não é o benefício certo, ou desistiu claramente; "Em Análise" quando ainda está avaliando. ' +
     'NÃO use "Contrato Assinado" (isso é automático na assinatura) nem etapas do processo ' +
     '(Protocolado, Perícia, Deferido) — essas a equipe cuida.';
@@ -32,7 +40,8 @@ export class MoverNoFunilTool implements AiTool {
       etapa: {
         type: 'string',
         enum: [...ETAPAS],
-        description: 'Etapa destino: Em Análise | Qualificado | Desqualificado.',
+        description:
+          'Etapa destino: Em Análise | Proposta Enviada | Qualificado | Desqualificado.',
       },
       motivo: {
         type: 'string',

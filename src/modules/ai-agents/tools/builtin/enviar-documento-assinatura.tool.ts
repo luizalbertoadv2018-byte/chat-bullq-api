@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { ZapSignClientService } from '../client-ops/zapsign-client.service';
+import { PipelinesService } from '../../../pipelines/pipelines.service';
 import { DocumentPdfService } from '../client-ops/document-pdf.service';
 
 /**
@@ -115,6 +116,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
     private readonly zapsign: ZapSignClientService,
     private readonly pdf: DocumentPdfService,
     @InjectQueue('tramitacao-sync') private readonly tramitacaoQueue: Queue,
+    private readonly pipelines: PipelinesService,
   ) {}
 
   /**
@@ -126,6 +128,25 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
    * empurrado e os documentos recebidos são espelhados. Assim o Tramitação não
    * enche de leads que nunca viraram cliente. Fire-and-forget.
    */
+  /**
+   * O contrato saiu: o card do lead vai para "Ficha Enviada" (quando o funil
+   * tem essa etapa), sem depender de o agente lembrar de mover. É a coluna que
+   * mostra quem está a uma assinatura de fechar. Fire-and-forget.
+   */
+  private moveCardToFichaEnviada(ctx: ToolContext): void {
+    void this.pipelines
+      .moveConversationCardsToStage(
+        ctx.conversationId,
+        ctx.organizationId,
+        'Ficha Enviada',
+      )
+      .catch((err) =>
+        this.logger.warn(
+          `mover card p/ Ficha Enviada falhou (run=${ctx.runId}): ${err?.message ?? err}`,
+        ),
+      );
+  }
+
   private stashCadastroForSignature(
     input: Record<string, unknown>,
     ctx: ToolContext,
@@ -492,6 +513,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
         // Camada 2: guarda o cadastro coletado como pendente (só vai pro
         // Tramitação quando o cliente assinar).
         this.stashCadastroForSignature(input, ctx, doc.docToken);
+        this.moveCardToFichaEnviada(ctx);
         const linkModelo = doc.signers[0]?.signUrl ?? null;
         return {
           output: {
@@ -596,6 +618,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
       // Camada 2: guarda o cadastro do signatário como pendente (vai pro
       // Tramitação só na assinatura).
       this.stashCadastroForSignature(input, ctx, doc.docToken);
+      this.moveCardToFichaEnviada(ctx);
 
       const link = doc.signers[0]?.signUrl ?? null;
       return {
