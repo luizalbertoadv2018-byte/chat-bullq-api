@@ -23,6 +23,27 @@ export class EvolutionMessageMapper {
     const key = data?.key;
     const message = data?.message;
     if (!key || !message) return null;
+    // Envelopes sem conteúdo próprio: o álbum só anuncia as fotos (que
+    // chegam cada uma na sua mensagem) e os de protocolo/criptografia não
+    // são conversa. Sem este filtro viravam "[mensagem não suportada]".
+    if (
+      message.albumMessage ||
+      message.secretEncryptedMessage ||
+      message.protocolMessage ||
+      message.senderKeyDistributionMessage
+    ) {
+      const hasRealContent = Object.keys(message).some(
+        (k) =>
+          ![
+            'albumMessage',
+            'secretEncryptedMessage',
+            'protocolMessage',
+            'senderKeyDistributionMessage',
+            'messageContextInfo',
+          ].includes(k),
+      );
+      if (!hasRealContent) return null;
+    }
 
     const remoteJid: string = key.remoteJid || '';
     const isGroup = remoteJid.endsWith('@g.us');

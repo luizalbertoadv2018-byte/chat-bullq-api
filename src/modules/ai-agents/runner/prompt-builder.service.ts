@@ -20,6 +20,8 @@ export interface PromptContext {
   memorySummary: string | null;
   memoryFacts: Record<string, unknown> | null;
   triggerMessage: Message;
+  /** Estado do caso lido do banco (ficha, etapa, documentos). Ver CaseStateService. */
+  caseState?: string | null;
   /** Extra prompt fragments contributed by the agent's active skills. */
   skillInstructions?: string[];
   /** Compact product catalog for sales agents — name + slug + 1 line each.
@@ -485,7 +487,9 @@ export class PromptBuilderService {
             type: 'text',
             text: `\n═══ Agora ═══\n- Hora atual: ${this.formatNow(
               ctx.organization.aiTimezone,
-            )} (${ctx.organization.aiTimezone})`,
+            )} (${ctx.organization.aiTimezone})${
+              ctx.caseState ? `\n\n${ctx.caseState}` : ''
+            }`,
             cache: false,
           },
         ],

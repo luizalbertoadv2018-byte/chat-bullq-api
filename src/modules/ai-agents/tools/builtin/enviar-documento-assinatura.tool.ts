@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { ZapSignClientService } from '../client-ops/zapsign-client.service';
 import { PipelinesService } from '../../../pipelines/pipelines.service';
+import { PrismaService } from '../../../../database/prisma.service';
 import { DocumentPdfService } from '../client-ops/document-pdf.service';
 
 /**
@@ -117,6 +118,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
     private readonly pdf: DocumentPdfService,
     @InjectQueue('tramitacao-sync') private readonly tramitacaoQueue: Queue,
     private readonly pipelines: PipelinesService,
+    private readonly prisma: PrismaService,
   ) {}
 
   /**
@@ -145,6 +147,59 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
           `mover card p/ Ficha Enviada falhou (run=${ctx.runId}): ${err?.message ?? err}`,
         ),
       );
+  }
+
+  /**
+   * Um cliente, uma ficha. O agente só enxerga parte do histórico e já gerou
+   * SEGUNDO contrato para quem tinha acabado de assinar. Se o contato já
+   * assinou, recusa; se já tem ficha pendente, devolve o link que existe.
+   */
+  private async existingContractGuard(
+    ctx: ToolContext,
+  ): Promise<ToolResult | null> {
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: ctx.contactId },
+      select: { metadata: true },
+    });
+    const meta = (contact?.metadata ?? {}) as Record<string, any>;
+
+    if (meta.tramitacaoReleased === true) {
+      return {
+        output: {
+          ok: false,
+          jaAssinado: true,
+          error:
+            'Este cliente JÁ ASSINOU a ficha. Não gere outra e não peça os dados de novo. Siga para os documentos básicos ou, se já foram pedidos, encerre com a mensagem de aguardo.',
+        },
+      };
+    }
+
+    const pendingToken: string | undefined = meta.pendingCadastro?.docToken;
+    if (pendingToken) {
+      let link: string | null = null;
+      try {
+        const doc = await this.zapsign.getDocument(pendingToken);
+        link = doc.signers[0]?.signUrl ?? null;
+      } catch (err: any) {
+        this.logger.warn(
+          `ficha pendente ${pendingToken}: não consegui reler o link: ${err?.message ?? err}`,
+        );
+      }
+      return {
+        output: {
+          ok: true,
+          jaEnviada: true,
+          docToken: pendingToken,
+          linkAssinatura: link,
+          instrucao:
+            'Já existe uma ficha gerada para este cliente, aguardando assinatura. NÃO foi criada outra. ' +
+            (link
+              ? 'Reenvie este mesmo linkAssinatura ao cliente.'
+              : 'Peça para ele assinar pelo link que já recebeu.'),
+        },
+      };
+    }
+    return null;
   }
 
   private stashCadastroForSignature(
@@ -416,6 +471,8 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
       }
 
       if (acao === 'enviarModelo') {
+        const blocked = await this.existingContractGuard(ctx);
+        if (blocked) return blocked;
         const signer = this.readSigner(input);
         if (!signer.name) {
           return { output: { ok: false, error: 'Preciso do signatarioNome.' } };
@@ -530,6 +587,8 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
       }
 
       // acao === 'enviar'
+      const blockedEnviar = await this.existingContractGuard(ctx);
+      if (blockedEnviar) return blockedEnviar;
       const nomeDocumento = String(input.nomeDocumento ?? '').trim();
       const conteudo = String(input.conteudo ?? '').trim();
       const pdfUrl = String(input.pdfUrl ?? '').trim();

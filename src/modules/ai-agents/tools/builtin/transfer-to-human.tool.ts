@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { RealtimeGateway } from '../../../realtime/realtime.gateway';
 import { PendingActionService } from '../../confirmations/pending-action.service';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
+import { PrismaService } from '../../../../database/prisma.service';
+import { OwnerAlertService } from '../../../owner-alerts/owner-alert.service';
 
 /**
  * Hands the conversation off to a human. Pauses AI on this conversation
@@ -45,6 +47,8 @@ export class TransferToHumanTool implements AiTool {
   constructor(
     private readonly realtime: RealtimeGateway,
     private readonly pendingActions: PendingActionService,
+    private readonly prisma: PrismaService,
+    private readonly ownerAlerts: OwnerAlertService,
   ) {}
 
   async execute(
@@ -53,6 +57,46 @@ export class TransferToHumanTool implements AiTool {
   ): Promise<ToolResult> {
     const reason = String(input.reason ?? '').trim() || 'Handoff sem motivo informado';
     const summary = input.summary ? String(input.summary).trim() : null;
+
+    // Cliente que já assinou: a passagem pra equipe é o fim natural do
+    // atendimento da IA, não uma decisão a aprovar. O cartão de aprovação
+    // expirava sem ninguém ver e a IA seguia conversando (e recomeçando o
+    // funil). Aqui a IA silencia na hora e o escritório é avisado.
+    const conv = await this.prisma.conversation.findUnique({
+      where: { id: ctx.conversationId },
+      select: { contact: { select: { metadata: true } } },
+    });
+    const contactMeta = (conv?.contact?.metadata ?? {}) as Record<string, any>;
+    if (contactMeta.tramitacaoReleased === true) {
+      await this.prisma.conversation.update({
+        where: { id: ctx.conversationId },
+        data: { aiEnabled: false },
+      });
+      this.realtime.emitToConversation(
+        ctx.conversationId,
+        'conversation:updated',
+        { conversationId: ctx.conversationId, aiEnabled: false },
+      );
+      void this.ownerAlerts.notifyAboutConversation(
+        ctx.conversationId,
+        '\u{1F91D} Cliente assinado aguardando a equipe',
+        `A IA encerrou a parte dela. ${reason}`,
+      );
+      this.logger.log(
+        `Agent ${ctx.agentId} encerrou e passou conv ${ctx.conversationId} pra equipe (cliente assinado; sem aprovação)`,
+      );
+      return {
+        output: {
+          ok: true,
+          status: 'handed_off',
+          message:
+            'Conversa entregue à equipe. A IA não responde mais nesta conversa.',
+          agent_should_say:
+            'Não diga que está transferindo. Se ainda não enviou a mensagem de encerramento (a equipe dá seguimento e retorna em breve), envie agora; senão, não envie mais nada.',
+        },
+        finalAction: 'TRANSFERRED_TO_HUMAN',
+      };
+    }
 
     const preview = {
       action: `Transferir conversa pro atendimento humano: ${reason}`,

@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { PipelinesService } from '../../../pipelines/pipelines.service';
+import { PrismaService } from '../../../../database/prisma.service';
 
 const ETAPAS = [
   'Em Análise',
@@ -51,7 +52,10 @@ export class MoverNoFunilTool implements AiTool {
     },
   };
 
-  constructor(private readonly pipelines: PipelinesService) {}
+  constructor(
+    private readonly pipelines: PipelinesService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async execute(
     input: Record<string, unknown>,
@@ -61,6 +65,40 @@ export class MoverNoFunilTool implements AiTool {
     if (!ETAPAS.includes(etapa as (typeof ETAPAS)[number])) {
       return { output: { ok: false, error: 'etapa inválida', permitidas: ETAPAS } };
     }
+    // Depois de assinado o card só anda pra frente, e quem move é o sistema
+    // ou a equipe. Sem isso o agente devolvia cliente assinado pra triagem.
+    const card = await this.prisma.card.findFirst({
+      where: { conversationId: ctx.conversationId },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        stage: { select: { name: true, order: true, pipelineId: true } },
+        contact: { select: { metadata: true } },
+      },
+    });
+    if (card) {
+      const signedStage = await this.prisma.pipelineStage.findFirst({
+        where: {
+          pipelineId: card.stage.pipelineId,
+          name: { equals: 'Contrato Assinado', mode: 'insensitive' },
+        },
+        select: { order: true },
+      });
+      const meta = (card.contact?.metadata ?? {}) as Record<string, any>;
+      const alreadySigned =
+        meta.tramitacaoReleased === true ||
+        (!!signedStage && card.stage.order >= signedStage.order);
+      if (alreadySigned) {
+        return {
+          output: {
+            ok: true,
+            movido: false,
+            etapaAtual: card.stage.name,
+            obs: 'O contrato deste cliente já está assinado: o card não volta para etapas anteriores. Não refaça triagem nem proposta.',
+          },
+        };
+      }
+    }
+
     const res = await this.pipelines.moveConversationCardsToStage(
       ctx.conversationId,
       ctx.organizationId,

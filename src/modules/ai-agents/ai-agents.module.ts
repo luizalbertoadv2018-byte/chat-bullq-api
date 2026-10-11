@@ -31,6 +31,7 @@ import { EvalsModule } from './evals/evals.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
 import { PipelinesModule } from '../pipelines/pipelines.module';
 import { ThemeCardService } from './runner/theme-card.service';
+import { CaseStateService } from './runner/case-state.service';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { ThemeCardService } from './runner/theme-card.service';
     PromptBuilderService,
     AiAgentRunnerService,
     ThemeCardService,
+    CaseStateService,
     ModelRouterService,
     AgentRunJanitorService,
     AgentRouterService,

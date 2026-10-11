@@ -38,6 +38,7 @@ import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { sanitizeAssistantText } from './text-guards';
 import { MediaUrlResolverService } from './media-url-resolver.service';
 import { ThemeCardService } from './theme-card.service';
+import { CaseStateService } from './case-state.service';
 
 // Cada iteração e cada mensagem do histórico é reenviada e RE-COBRADA a cada
 // chamada ao LLM. 4 iterações cobrem quase todo turno real (raramente > 3
@@ -103,6 +104,7 @@ export class AiAgentRunnerService {
     private readonly realtime: RealtimeGateway,
     private readonly mediaUrlResolver: MediaUrlResolverService,
     private readonly themeCard: ThemeCardService,
+    private readonly caseState: CaseStateService,
     @InjectQueue('memory-extractor')
     private readonly memoryExtractorQueue: Queue,
     @InjectQueue('rag-indexer')
@@ -250,6 +252,14 @@ export class AiAgentRunnerService {
         return new Map<string, { url: string; mimeType?: string }>();
       });
 
+    const caseState = await this.caseState.describe({
+      conversationId: conversation.id,
+      organizationId: conversation.organizationId,
+      contactMetadata: contact.metadata,
+      agentPipelineId: agent.pipelineId ?? null,
+      timezone: organization.aiTimezone,
+    });
+
     const messages = this.promptBuilder.buildMessages({
       organization,
       agent,
@@ -263,6 +273,7 @@ export class AiAgentRunnerService {
       triggerMessage,
       skillInstructions,
       catalog,
+      caseState,
     });
 
     // Fase 2.5: augmenta o system message com Security Layer (prepend)
