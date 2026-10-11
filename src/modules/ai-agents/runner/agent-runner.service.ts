@@ -292,6 +292,7 @@ export class AiAgentRunnerService {
     let iterationCount = 0;
     const toolsCalled = new Set<string>();
     let salesNudgeUsed = false;
+    let emptyTurnNudgeUsed = false;
 
     // Roteamento de modelo (fugu por padrão, fugu-ultra só na síntese de
     // workers). Iterações de ferramenta são mecânicas → modelo barato. A
@@ -447,6 +448,27 @@ export class AiAgentRunnerService {
               role: 'user',
               content:
                 'Você rodou as tools de preparação (lookupOffering / checkPurchase) mas não chamou replyToConversation. O cliente está esperando. Responda agora com replyToConversation: 1 frase de pitch ligada à dor + preço + link do checkout (vindos do lookupOffering). Não termine este turn sem chamar replyToConversation.',
+            });
+            continue;
+          }
+
+          // Turno vazio: o modelo encerrou sem tool, sem texto aproveitável e
+          // sem ter respondido nada neste run (visto com modelos que raciocinam
+          // antes de falar: gastam o turno "pensando" e não emitem resposta).
+          // O cliente fica no vácuo. Cobramos UMA vez a resposta e re-iteramos.
+          if (
+            neverReplied &&
+            finalAction === AiFinalAction.NO_ACTION &&
+            !emptyTurnNudgeUsed
+          ) {
+            emptyTurnNudgeUsed = true;
+            this.logger.warn(
+              `Run ${run.id}: turno encerrado sem resposta ao cliente — cobrando uma resposta`,
+            );
+            messages.push({
+              role: 'user',
+              content:
+                '[aviso do sistema, não é mensagem do cliente] Você encerrou o turno sem responder. O cliente mandou mensagem e está esperando. Chame replyToConversation agora com a resposta: responda o que ele perguntou e siga o próximo passo do fluxo.',
             });
             continue;
           }
