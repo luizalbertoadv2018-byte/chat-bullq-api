@@ -1,6 +1,21 @@
 import { Injectable } from '@nestjs/common';
 import { ConversationStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../database/prisma.service';
+import {
+  MESSAGE_SEARCH_MIN_LENGTH,
+  buildAccentRegex,
+  buildSnippet,
+  normalizeSearch,
+  pickMatchedText,
+} from './message-search.util';
+
+/** Mensagem que casou com a busca por texto, anexada à conversa na lista. */
+export interface ConversationSearchMatch {
+  messageId: string;
+  text: string;
+  direction: string;
+  createdAt: Date;
+}
 
 export interface InboxFilters {
   organizationId: string;
@@ -142,12 +157,26 @@ export class ConversationsRepository {
     }
     if (filters.assignedToId) where.assignedToId = filters.assignedToId;
     if (filters.stuckOnly) where.isStuck = true;
-    if (filters.search) {
-      where.OR = [
-        { contact: { name: { contains: filters.search, mode: 'insensitive' } } },
-        { contact: { phone: { contains: filters.search } } },
-        { protocol: { contains: filters.search } },
-      ];
+    // Busca: nome, telefone, protocolo OU texto de qualquer mensagem da
+    // conversa (estilo WhatsApp). Vai em AND pra não colidir com o OR de tags.
+    const search = filters.search?.trim();
+    let messageMatches = new Map<string, ConversationSearchMatch>();
+    if (search) {
+      messageMatches = await this.findMessageMatches(
+        filters.organizationId,
+        search,
+      );
+      (where.AND ??= [] as Prisma.ConversationWhereInput[]);
+      (where.AND as Prisma.ConversationWhereInput[]).push({
+        OR: [
+          { contact: { name: { contains: search, mode: 'insensitive' } } },
+          { contact: { phone: { contains: search } } },
+          { protocol: { contains: search } },
+          ...(messageMatches.size > 0
+            ? [{ id: { in: [...messageMatches.keys()] } }]
+            : []),
+        ],
+      });
     }
 
     // Origem do contato (contact.metadata.origem === valor).
@@ -328,7 +357,82 @@ export class ConversationsRepository {
       ? await this.attachUnreadCounts(conversations, currentUserId)
       : conversations.map((c) => ({ ...c, unreadCount: 0 }));
 
-    return { conversations: enriched, total };
+    if (!search || messageMatches.size === 0) {
+      return { conversations: enriched, total };
+    }
+
+    // Anexa o trecho encontrado. Quando o próprio contato já casa com a busca
+    // (nome/telefone/protocolo), a conversa aparece normal, sem trecho: quem
+    // procura "Maria" quer a conversa da Maria, não uma mensagem dela.
+    const needle = normalizeSearch(search);
+    const withMatch = enriched.map((c) => {
+      const match = messageMatches.get(c.id);
+      if (!match) return c;
+      const byContact =
+        normalizeSearch(c.contact?.name ?? '').includes(needle) ||
+        (c.contact?.phone ?? '').includes(search) ||
+        (c.protocol ?? '').includes(search);
+      return byContact ? c : { ...c, searchMatch: match };
+    });
+
+    return { conversations: withMatch, total };
+  }
+
+  /**
+   * Mensagem mais recente de cada conversa da org cujo texto (ou legenda)
+   * contém o termo, ignorando maiúsculas e acentos. Sem índice de texto: é
+   * uma varredura da tabela de mensagens, aceitável no volume atual.
+   */
+  private async findMessageMatches(
+    organizationId: string,
+    search: string,
+  ): Promise<Map<string, ConversationSearchMatch>> {
+    const matches = new Map<string, ConversationSearchMatch>();
+    const needle = normalizeSearch(search);
+    if (needle.length < MESSAGE_SEARCH_MIN_LENGTH) return matches;
+    const pattern = buildAccentRegex(search);
+
+    const rows = await this.prisma.$queryRaw<
+      {
+        conversationId: string;
+        messageId: string;
+        text: string | null;
+        caption: string | null;
+        direction: string;
+        createdAt: Date;
+      }[]
+    >`
+      SELECT DISTINCT ON (m.conversation_id)
+             m.conversation_id AS "conversationId",
+             m.id AS "messageId",
+             m.content->>'text' AS text,
+             m.content->>'caption' AS caption,
+             m.direction::text AS direction,
+             m.created_at AS "createdAt"
+      FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE c.organization_id = ${organizationId}
+        AND c.deleted_at IS NULL
+        AND m.revoked_at IS NULL
+        AND (
+          m.content->>'text' ~* ${pattern}
+          OR m.content->>'caption' ~* ${pattern}
+        )
+      ORDER BY m.conversation_id, m.created_at DESC
+    `;
+
+    for (const row of rows) {
+      matches.set(row.conversationId, {
+        messageId: row.messageId,
+        text: buildSnippet(
+          pickMatchedText(search, row.text, row.caption),
+          search,
+        ),
+        direction: row.direction,
+        createdAt: row.createdAt,
+      });
+    }
+    return matches;
   }
 
   private async attachUnreadCounts<
