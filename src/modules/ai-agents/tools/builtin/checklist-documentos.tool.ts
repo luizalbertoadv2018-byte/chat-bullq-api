@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { PrismaService } from '../../../../database/prisma.service';
 import { DocumentosBeneficioService } from '../../../documentos-beneficio/documentos-beneficio.service';
+import { matchDocumento } from './documento-match.util';
 
 /**
  * Checklist de documentos do benefício do lead. A IA usa pra saber o que o
@@ -99,6 +100,8 @@ export class ChecklistDocumentosTool implements AiTool {
       }
       let doc = docs.find((d) => this.norm(d.name) === alvo);
       if (!doc) doc = docs.find((d) => this.norm(d.name).includes(alvo) || alvo.includes(this.norm(d.name)));
+      // Plural, sinônimo ou nome abreviado: casa pelas palavras do nome.
+      if (!doc) doc = matchDocumento(docs, String(input.documento ?? ''));
       if (!doc) {
         return {
           output: {
