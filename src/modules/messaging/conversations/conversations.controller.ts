@@ -86,6 +86,7 @@ export class ConversationsController {
     @Query('channelId') channelId?: string,
     @Query('assignedToId') assignedToId?: string,
     @Query('search') search?: string,
+    @Query('situacaoId') situacaoId?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('archived') archived?: string,
@@ -123,6 +124,7 @@ export class ConversationsController {
         status,
         channelId,
         assignedToId,
+        situacaoId: situacaoId || undefined,
         search,
         archived: archivedScope,
         unreadOnly: unread === 'true' || unread === '1',
@@ -204,8 +206,9 @@ export class ConversationsController {
   getCounts(
     @CurrentOrg('id') orgId: string,
     @CurrentChannelAccess() access: ChannelAccess,
+    @Query('channelId') channelId?: string,
   ) {
-    return this.service.getStatusCounts(orgId, access);
+    return this.service.getStatusCounts(orgId, access, channelId || undefined);
   }
 
   @Post(':id/summary')

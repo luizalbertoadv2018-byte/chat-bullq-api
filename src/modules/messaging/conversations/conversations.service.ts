@@ -261,6 +261,7 @@ export class ConversationsService {
       kind?: 'INDIVIDUAL' | 'GROUP';
       tagIds?: string[];
       assignedToId?: string;
+      situacaoId?: string;
       search?: string;
       archived?: 'exclude' | 'only' | 'any';
       unreadOnly?: boolean;
@@ -336,6 +337,7 @@ export class ConversationsService {
       kind: isGroupResolved ? 'GROUP' : filters.kind,
       tagIds: filters.tagIds,
       assignedToId: filters.assignedToId,
+      situacaoId: filters.situacaoId,
       search: filters.search,
       accessibleChannelIds: access === 'ALL' ? undefined : [...access],
       archived: filters.archived,
@@ -830,9 +832,13 @@ export class ConversationsService {
     return updated;
   }
 
-  async getStatusCounts(organizationId: string, access: ChannelAccess = 'ALL') {
+  async getStatusCounts(
+    organizationId: string,
+    access: ChannelAccess = 'ALL',
+    channelId?: string,
+  ) {
     const accessibleIds = access === 'ALL' ? undefined : [...access];
-    return this.repository.countByStatus(organizationId, accessibleIds);
+    return this.repository.countByStatus(organizationId, accessibleIds, channelId);
   }
 
   /**

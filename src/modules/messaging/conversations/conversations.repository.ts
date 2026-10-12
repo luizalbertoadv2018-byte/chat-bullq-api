@@ -34,6 +34,8 @@ export interface InboxFilters {
   /** Tag ids applied to the conversation OR its contact. ANY match. */
   tagIds?: string[];
   assignedToId?: string;
+  /** Situação de negócio (ex.: "Contrato Assinado"). */
+  situacaoId?: string;
   search?: string;
   accessibleChannelIds?: string[];
   /**
@@ -156,6 +158,7 @@ export class ConversationsRepository {
       ];
     }
     if (filters.assignedToId) where.assignedToId = filters.assignedToId;
+    if (filters.situacaoId) where.situacaoId = filters.situacaoId;
     if (filters.stuckOnly) where.isStuck = true;
     // Busca: nome, telefone, protocolo OU texto de qualquer mensagem da
     // conversa (estilo WhatsApp). Vai em AND pra não colidir com o OR de tags.
@@ -568,24 +571,53 @@ export class ConversationsRepository {
     return this.prisma.conversation.update({ where: { id }, data });
   }
 
-  async countByStatus(organizationId: string, accessibleChannelIds?: string[]) {
+  /**
+   * Números das abas do inbox: por status e por situação (chave
+   * `SITUACAO:<id>`). Segue o que a lista mostra por padrão — sem arquivadas
+   * e sem grupos — e respeita o canal selecionado; senão o número da aba não
+   * bate com o que aparece ao clicar nela.
+   */
+  async countByStatus(
+    organizationId: string,
+    accessibleChannelIds?: string[],
+    channelId?: string,
+  ) {
     if (accessibleChannelIds !== undefined && accessibleChannelIds.length === 0) {
       return {} as Record<string, number>;
     }
-    const counts = await this.prisma.conversation.groupBy({
-      by: ['status'],
-      where: {
-        organizationId,
-        deletedAt: null,
-        ...(accessibleChannelIds !== undefined
+    if (
+      channelId &&
+      accessibleChannelIds !== undefined &&
+      !accessibleChannelIds.includes(channelId)
+    ) {
+      return {} as Record<string, number>;
+    }
+    const where: Prisma.ConversationWhereInput = {
+      organizationId,
+      deletedAt: null,
+      isArchived: false,
+      isGroup: false,
+      ...(channelId
+        ? { channelId }
+        : accessibleChannelIds !== undefined
           ? { channelId: { in: accessibleChannelIds } }
           : {}),
-      },
-      _count: true,
-    });
-    return counts.reduce(
-      (acc, c) => ({ ...acc, [c.status]: c._count }),
-      {} as Record<string, number>,
-    );
+    };
+    const [byStatus, bySituacao] = await Promise.all([
+      this.prisma.conversation.groupBy({
+        by: ['status'],
+        where,
+        _count: true,
+      }),
+      this.prisma.conversation.groupBy({
+        by: ['situacaoId'],
+        where: { ...where, situacaoId: { not: null } },
+        _count: true,
+      }),
+    ]);
+    const result: Record<string, number> = {};
+    for (const c of byStatus) result[c.status] = c._count;
+    for (const c of bySituacao) result[`SITUACAO:${c.situacaoId}`] = c._count;
+    return result;
   }
 }
