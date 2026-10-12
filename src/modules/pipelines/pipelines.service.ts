@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { CardStatus, PipelineStageType } from '@prisma/client';
@@ -26,6 +27,8 @@ const DEFAULT_STAGES: UpsertStageDto[] = [
 
 @Injectable()
 export class PipelinesService {
+  private readonly logger = new Logger(PipelinesService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
@@ -317,7 +320,75 @@ export class PipelinesService {
     });
 
     this.realtime.emitToOrg(organizationId, 'card:created', { card });
+    await this.syncSituacaoFromStage(organizationId, card.conversationId, stageId);
     return card;
+  }
+
+  /**
+   * Faz a "Situação" da conversa acompanhar a etapa do funil. Sem isso o campo
+   * só mudava à mão e ficava vazio ou desatualizado.
+   *
+   * Qual situação corresponde a cada etapa:
+   * `organizations.settings.situacaoByStage` = { stageId: situacaoId }; sem
+   * entrada para a etapa, vale a situação de mesmo nome (ignorando maiúsculas
+   * e acentos). Etapa sem correspondência não mexe na situação. Nunca lança.
+   */
+  private async syncSituacaoFromStage(
+    organizationId: string,
+    conversationId: string | null | undefined,
+    stageId: string,
+  ): Promise<void> {
+    if (!conversationId) return;
+    try {
+      const org = await this.prisma.organization.findUnique({
+        where: { id: organizationId },
+        select: { settings: true },
+      });
+      const map = ((org?.settings ?? {}) as Record<string, any>)
+        .situacaoByStage as Record<string, string> | undefined;
+
+      let situacaoId: string | undefined =
+        map && typeof map === 'object' ? map[stageId] : undefined;
+      if (situacaoId) {
+        const exists = await this.prisma.conversationSituacao.findFirst({
+          where: { id: situacaoId, organizationId },
+          select: { id: true },
+        });
+        if (!exists) situacaoId = undefined;
+      }
+      if (!situacaoId) {
+        const stage = await this.prisma.pipelineStage.findUnique({
+          where: { id: stageId },
+          select: { name: true },
+        });
+        const norm = (v: string) =>
+          v
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[^a-z0-9]/g, '');
+        const situacoes = await this.prisma.conversationSituacao.findMany({
+          where: { organizationId },
+          select: { id: true, name: true },
+        });
+        situacaoId = situacoes.find(
+          (x) => stage && norm(x.name) === norm(stage.name),
+        )?.id;
+      }
+      if (!situacaoId) return;
+
+      await this.prisma.conversation.updateMany({
+        where: {
+          id: conversationId,
+          organizationId,
+          NOT: { situacaoId },
+        },
+        data: { situacaoId },
+      });
+    } catch (err: any) {
+      this.logger.warn(
+        `situação não sincronizada (conv ${conversationId}): ${err?.message ?? err}`,
+      );
+    }
   }
 
   async updateCard(
@@ -466,6 +537,14 @@ export class PipelinesService {
         },
       });
     });
+
+    if (!sameStage) {
+      await this.syncSituacaoFromStage(
+        organizationId,
+        card.conversationId,
+        dto.toStageId,
+      );
+    }
 
     this.realtime.emitToOrg(organizationId, 'card:moved', {
       cardId,
