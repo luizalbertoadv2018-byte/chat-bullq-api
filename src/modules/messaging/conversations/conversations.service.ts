@@ -13,6 +13,7 @@ import { ConversationFsmService } from './conversation-fsm.service';
 import { UpdateConversationDto } from './dto/update-conversation.dto';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { PrismaService } from '../../../database/prisma.service';
+import { syncConversationStatus } from './conversation-status-sync';
 import { ChannelAdapterRegistry } from '../../channel-hub/channel-adapter.registry';
 import { HistoryImportService } from '../pipeline/history-import.service';
 import {
@@ -449,7 +450,37 @@ export class ConversationsService {
     }
 
     if (dto.status && dto.status !== conversation.status) {
-      await this.fsm.transition(id, dto.status, actorId);
+      if (
+        dto.status === ConversationStatus.BOT &&
+        !this.fsm.canTransition(conversation.status, ConversationStatus.BOT)
+      ) {
+        // "Devolver pra IA" vale a partir de qualquer status; a FSM só
+        // conhece PENDING → BOT.
+        await syncConversationStatus(
+          this.prisma,
+          id,
+          ConversationStatus.BOT,
+          [conversation.status],
+          'manual-to-bot',
+        );
+      } else {
+        await this.fsm.transition(id, dto.status, actorId);
+      }
+
+      // O status escolhido à mão diz quem atende: "Em atendimento" é um
+      // humano assumindo (a IA sai da conversa); "IA / Bot" devolve pra IA.
+      // Sem isso a IA seguia respondendo e o status voltava sozinho pra BOT.
+      if (
+        dto.status === ConversationStatus.OPEN &&
+        conversation.aiEnabled !== false
+      ) {
+        await this.toggleAi(id, organizationId, false, actorId, access);
+      } else if (
+        dto.status === ConversationStatus.BOT &&
+        conversation.aiEnabled !== true
+      ) {
+        await this.toggleAi(id, organizationId, true, actorId, access);
+      }
     }
 
     if (dto.departmentId !== undefined) {
