@@ -206,17 +206,31 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       });
       if (!conversation) return;
 
-      const last = await this.prisma.message.findFirst({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'desc' },
-      });
-      const lastText = String((last?.content as any)?.text ?? '');
-      if (
-        !last ||
-        last.direction !== MessageDirection.OUTBOUND ||
-        !/zapsign\.com\.br/i.test(lastText)
-      ) {
-        return;
+      // Agente de coleta configurado para o funil deste caso? Então é ele
+      // quem assume a conversa a partir da assinatura: o agente de venda não
+      // colhe documento nem dossiê (e por isso não tem como recomeçar o funil).
+      const collector = await this.findPostSignatureAgent(
+        conversation.id,
+        contact.organizationId,
+      );
+      // Humano desligou a IA nesta conversa: não reassumimos por cima dele.
+      if (collector && conversation.aiEnabled === false) return;
+      // Já está com o coletor (reentrega do webhook): não repete a abertura.
+      if (collector && conversation.activeAgentId === collector.id) return;
+
+      if (!collector) {
+        const last = await this.prisma.message.findFirst({
+          where: { conversationId: conversation.id },
+          orderBy: { createdAt: 'desc' },
+        });
+        const lastText = String((last?.content as any)?.text ?? '');
+        if (
+          !last ||
+          last.direction !== MessageDirection.OUTBOUND ||
+          !/zapsign\.com\.br/i.test(lastText)
+        ) {
+          return;
+        }
       }
 
       const contactChannel = await this.prisma.contactChannel.findFirst({
@@ -229,7 +243,20 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       const fullName: string =
         meta.pendingCadastro?.cadastro?.name ?? contact.name ?? '';
       const firstName = fullName.trim().split(/\s+/)[0] ?? '';
-      const text = `Recebi a sua ficha assinada${firstName ? `, ${firstName}` : ''}! Agora me envia uma foto do seu RG ou CNH, frente e verso?`;
+      const collectorFirstName = collector?.name.trim().split(/[^\p{L}]+/u)[0] ?? '';
+      const text = collector
+        ? `Oi${firstName ? `, ${firstName}` : ''}! Aqui é a ${collectorFirstName}, da equipe que vai cuidar do seu caso no escritório Alberto Martins. ` +
+          'Recebi a sua ficha assinada, obrigada! Vou te pedir alguns documentos e informações rapidinho pra gente montar a sua ação. ' +
+          'Pode me enviar uma foto do seu RG ou CNH, frente e verso?'
+        : `Recebi a sua ficha assinada${firstName ? `, ${firstName}` : ''}! Agora me envia uma foto do seu RG ou CNH, frente e verso?`;
+
+      if (collector) {
+        await this.prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { activeAgentId: collector.id },
+        });
+      }
+      const speaker = collector ?? conversation.activeAgent;
 
       const message = await this.prisma.message.create({
         data: {
@@ -238,12 +265,10 @@ export class TramitacaoSyncProcessor extends WorkerHost {
           type: MessageContentType.TEXT,
           content: { text },
           status: MessageStatus.QUEUED,
-          senderName: conversation.activeAgent?.name ?? 'AI',
+          senderName: speaker?.name ?? 'AI',
           metadata: {
             auto: 'pos-assinatura',
-            ...(conversation.activeAgent
-              ? { aiAgentId: conversation.activeAgent.id }
-              : {}),
+            ...(speaker ? { aiAgentId: speaker.id } : {}),
           },
         },
       });
@@ -275,13 +300,43 @@ export class TramitacaoSyncProcessor extends WorkerHost {
         },
       );
       this.logger.log(
-        `pós-assinatura: pedido de documentos enviado (conv ${conversation.id})`,
+        `pós-assinatura: pedido de documentos enviado (conv ${conversation.id}${collector ? `; agente de coleta ${collector.name} assumiu` : ''})`,
       );
     } catch (err: any) {
       this.logger.warn(
         `pós-assinatura: não enviou o pedido de documentos p/ contato ${contact.id}: ${err?.message ?? err}`,
       );
     }
+  }
+
+  /**
+   * Agente que assume a conversa depois da assinatura, por funil:
+   * `organizations.settings.postSignatureAgentByPipeline` = { pipelineId: agentId }.
+   */
+  private async findPostSignatureAgent(
+    conversationId: string,
+    organizationId: string,
+  ): Promise<{ id: string; name: string } | null> {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { settings: true },
+    });
+    const map = ((org?.settings ?? {}) as Record<string, any>)
+      .postSignatureAgentByPipeline as Record<string, string> | undefined;
+    if (!map || typeof map !== 'object') return null;
+
+    const card = await this.prisma.card.findFirst({
+      where: { conversationId, pipelineId: { in: Object.keys(map) } },
+      orderBy: { updatedAt: 'desc' },
+      select: { pipelineId: true },
+    });
+    const agentId = card ? map[card.pipelineId] : undefined;
+    if (!agentId) return null;
+
+    return this.prisma.aiAgent.findFirst({
+      where: { id: agentId, organizationId, isActive: true, deletedAt: null },
+      select: { id: true, name: true },
+    });
   }
 
   /** Liberação MANUAL pelo operador (cliente presencial que não assina). */

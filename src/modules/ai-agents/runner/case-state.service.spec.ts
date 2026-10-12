@@ -38,6 +38,33 @@ describe('CaseStateService', () => {
     expect(text).toContain('PROIBIDO refazer a triagem');
   });
 
+  it('cliente assinado: mostra o dossiê colhido e o que falta perguntar', async () => {
+    const svc = build({ stage: { name: 'Contrato Assinado' } });
+    const text = await svc.describe({
+      ...base,
+      contactMetadata: {
+        tramitacaoReleased: true,
+        dossie: { conta: '@barbearia_jh', dataBloqueio: 'dia 5' },
+      },
+    });
+    expect(text).toContain('conta = "@barbearia_jh"');
+    expect(text).toContain('AINDA FALTA perguntar');
+    expect(text).toContain('desdeQuando');
+    expect(text).not.toContain('dataBloqueio (data aproximada');
+  });
+
+  it('dossiê completo: avisa que não há mais o que perguntar', async () => {
+    const svc = build({ stage: { name: 'Contrato Assinado' } });
+    const text = await svc.describe({
+      ...base,
+      contactMetadata: {
+        tramitacaoReleased: true,
+        dossie: { conta: 'a', dataBloqueio: 'b', desdeQuando: 'c', uso: 'd', revisao: 'e', prejuizo: 'f' },
+      },
+    });
+    expect(text).toContain('Dossiê: COMPLETO');
+  });
+
   it('ficha pendente: manda não gerar outra', async () => {
     const svc = build({ stage: { name: 'Ficha Enviada' } });
     const text = await svc.describe({

@@ -1,5 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../database/prisma.service';
+import {
+  DOSSIE_FIELDS,
+  missingDossieFields,
+  readDossie,
+} from './dossie.constants';
 
 /**
  * Estado do caso lido do banco e entregue ao agente a cada resposta.
@@ -79,17 +84,40 @@ export class CaseStateService {
         lines.push('- Grupo do caso com a equipe: já criado.');
       }
 
+      // Dossiê: só interessa depois da assinatura (é o agente de coleta que
+      // preenche). A lista de faltantes dita a próxima pergunta.
+      if (signed) {
+        const dossie = readDossie(meta);
+        const got = DOSSIE_FIELDS.filter((f) => dossie[f.key]);
+        const missing = missingDossieFields(meta);
+        if (got.length > 0) {
+          lines.push(
+            `- Dossiê, já registrado: ${got
+              .map((f) => `${f.key} = "${dossie[f.key].slice(0, 80)}"`)
+              .join('; ')}.`,
+          );
+        }
+        lines.push(
+          missing.length > 0
+            ? `- Dossiê, AINDA FALTA perguntar (nesta ordem): ${missing
+                .map((f) => `${f.key} (${f.label})`)
+                .join('; ')}.`
+            : '- Dossiê: COMPLETO, nada mais a perguntar.',
+        );
+      }
+
       if (signed) {
         lines.push(
           'REGRAS para este estado: é PROIBIDO refazer a triagem, refazer a proposta, pedir de novo os dados da ficha ou gerar outra ficha. ' +
             'Não duvide da assinatura nem peça para o cliente confirmar que assinou. ' +
-            'Peça só os documentos básicos que ainda não foram recebidos; depois de pedi-los uma vez, o atendimento está ENCERRADO: ' +
+            'Peça só os documentos básicos que ainda não foram recebidos e os itens do dossiê que ainda faltam; nunca repita o que já está registrado. ' +
+            'Quando não faltar mais nada (ou o cliente já tiver sido perguntado de tudo), o atendimento está ENCERRADO: ' +
             'responda em UMA frase curta, sem fazer novas perguntas, e deixe a equipe assumir.',
         );
       } else if (pending) {
         lines.push(
           'REGRAS para este estado: NÃO gere outra ficha e não refaça triagem nem proposta. ' +
-            'Se o cliente disser que assinou, agradeça e siga para os documentos (a confirmação da assinatura chega sozinha ao sistema). ' +
+            'Se o cliente disser que assinou, agradeça e siga o que o seu roteiro manda para depois da assinatura (a confirmação chega sozinha ao sistema). ' +
             'Se ele não achar o link, chame enviarDocumentoAssinatura normalmente: o sistema devolve o link que já existe.',
         );
       }

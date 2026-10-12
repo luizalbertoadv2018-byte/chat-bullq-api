@@ -4,6 +4,7 @@ import { PendingActionService } from '../../confirmations/pending-action.service
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { PrismaService } from '../../../../database/prisma.service';
 import { OwnerAlertService } from '../../../owner-alerts/owner-alert.service';
+import { missingDossieFields } from '../../runner/dossie.constants';
 
 /**
  * Hands the conversation off to a human. Pauses AI on this conversation
@@ -77,10 +78,15 @@ export class TransferToHumanTool implements AiTool {
         'conversation:updated',
         { conversationId: ctx.conversationId, aiEnabled: false },
       );
+      const dossieMissing = missingDossieFields(contactMeta);
       void this.ownerAlerts.notifyAboutConversation(
         ctx.conversationId,
-        '\u{1F91D} Cliente assinado aguardando a equipe',
-        `A IA encerrou a parte dela. ${reason}`,
+        dossieMissing.length === 0
+          ? '\u{1F4C1} Dossiê completo, cliente aguardando a equipe'
+          : '\u{1F4C1} Dossiê com pendências, cliente aguardando a equipe',
+        (dossieMissing.length > 0
+          ? `Faltou: ${dossieMissing.map((f) => f.label).join('; ')}.\n`
+          : '') + `A IA encerrou a parte dela. ${reason}`,
       );
       this.logger.log(
         `Agent ${ctx.agentId} encerrou e passou conv ${ctx.conversationId} pra equipe (cliente assinado; sem aprovação)`,

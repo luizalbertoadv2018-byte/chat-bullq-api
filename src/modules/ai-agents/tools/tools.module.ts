@@ -19,6 +19,7 @@ import { AgendarReuniaoTool } from './builtin/agendar-reuniao.tool';
 import { MoveRecoveryCardTool } from './builtin/move-recovery-card.tool';
 import { MoverNoFunilTool } from './builtin/mover-no-funil.tool';
 import { EnviarMensagemProntaTool } from './builtin/enviar-mensagem-pronta.tool';
+import { RegistrarDadoDoCasoTool } from './builtin/registrar-dado-do-caso.tool';
 import { ChecklistDocumentosTool } from './builtin/checklist-documentos.tool';
 import { EnviarDocumentoAssinaturaTool } from './builtin/enviar-documento-assinatura.tool';
 import { HoppeClientService } from './client-ops/hoppe-client.service';
@@ -84,6 +85,7 @@ import { DocumentosBeneficioModule } from '../../documentos-beneficio/documentos
     MoveRecoveryCardTool,
     MoverNoFunilTool,
     EnviarMensagemProntaTool,
+    RegistrarDadoDoCasoTool,
     ChecklistDocumentosTool,
     EnviarDocumentoAssinaturaTool,
     ToolRegistry,
