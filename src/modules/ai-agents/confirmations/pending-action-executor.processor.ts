@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import type { Job } from 'bullmq';
 
 import { PrismaService } from '../../../database/prisma.service';
+import { syncConversationStatus } from '../../messaging/conversations/conversation-status-sync';
 import { HttpToolExecutorService } from '../tools/http-tool-executor.service';
 import type { ToolContext } from '../tools/tool.types';
 import { PendingActionStorage } from './pending-action.storage';
@@ -132,6 +133,13 @@ export class PendingActionExecutorProcessor extends WorkerHost {
       where: { id: action.conversationId },
       data: { aiEnabled: false },
     });
+    await syncConversationStatus(
+      this.prisma,
+      action.conversationId,
+      'PENDING',
+      ['BOT'],
+      'ai-handoff-approved',
+    );
     return {
       ok: true,
       transferredAt: new Date().toISOString(),

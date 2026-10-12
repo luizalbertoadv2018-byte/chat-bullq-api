@@ -21,6 +21,7 @@ import { ForwardMessageDto } from './dto/forward-message.dto';
 import { StartConversationDto } from '../conversations/dto/start-conversation.dto';
 import { MediaResolverService } from './media-resolver.service';
 import { PrismaService } from '../../../database/prisma.service';
+import { syncConversationStatus } from '../conversations/conversation-status-sync';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import {
   ChannelAccess,
@@ -274,6 +275,16 @@ export class MessagesService {
           : {}),
       },
     });
+
+    // Humano respondeu: a conversa está "Em atendimento", não mais pendente
+    // nem com a IA.
+    await syncConversationStatus(
+      this.prisma,
+      conversation.id,
+      'OPEN',
+      ['PENDING', 'BOT'],
+      'human-replied',
+    );
 
     // Humano respondeu — cancela qualquer timer de watchdog pendente e
     // zera o contador de tentativas. Se a IA estava paralisada e quem

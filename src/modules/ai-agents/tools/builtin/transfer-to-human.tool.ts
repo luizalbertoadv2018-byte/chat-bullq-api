@@ -3,6 +3,7 @@ import { RealtimeGateway } from '../../../realtime/realtime.gateway';
 import { PendingActionService } from '../../confirmations/pending-action.service';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { PrismaService } from '../../../../database/prisma.service';
+import { syncConversationStatus } from '../../../messaging/conversations/conversation-status-sync';
 import { OwnerAlertService } from '../../../owner-alerts/owner-alert.service';
 import { missingDossieFields } from '../../runner/dossie.constants';
 
@@ -73,6 +74,13 @@ export class TransferToHumanTool implements AiTool {
         where: { id: ctx.conversationId },
         data: { aiEnabled: false },
       });
+      await syncConversationStatus(
+        this.prisma,
+        ctx.conversationId,
+        'PENDING',
+        ['BOT'],
+        'ai-handoff-signed-client',
+      );
       this.realtime.emitToConversation(
         ctx.conversationId,
         'conversation:updated',

@@ -39,6 +39,7 @@ import { sanitizeAssistantText } from './text-guards';
 import { MediaUrlResolverService } from './media-url-resolver.service';
 import { ThemeCardService } from './theme-card.service';
 import { CaseStateService } from './case-state.service';
+import { syncConversationStatus } from '../../messaging/conversations/conversation-status-sync';
 
 // Cada iteração e cada mensagem do histórico é reenviada e RE-COBRADA a cada
 // chamada ao LLM. 4 iterações cobrem quase todo turno real (raramente > 3
@@ -163,6 +164,16 @@ export class AiAgentRunnerService {
       );
       return;
     }
+
+    // A IA vai atender: o painel passa a mostrar "IA / Bot" em vez de deixar
+    // a conversa como "Pendente", como se ninguém tivesse pegado.
+    await syncConversationStatus(
+      this.prisma,
+      conversation.id,
+      'BOT',
+      ['PENDING', 'OPEN', 'WAITING'],
+      'ai-agent-run',
+    );
 
     const [organization, channel, contact, recentMessages, memory, catalog] =
       await Promise.all([
