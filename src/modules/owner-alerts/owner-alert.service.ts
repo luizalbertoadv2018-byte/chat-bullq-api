@@ -7,14 +7,22 @@ interface OwnerAlertsConfig {
   channelId?: string;
   /** Telefones que recebem os avisos (com DDD). */
   phones?: string[];
+  /**
+   * Grupo de WhatsApp que recebe os avisos (JID `...@g.us`). Quando definido,
+   * os avisos vão só para o grupo; `phones` segue valendo para a IA não
+   * atender esses números como se fossem leads.
+   */
+  groupJid?: string;
 }
 
 /**
- * Avisa o dono do escritório, no WhatsApp dele, quando um lead precisa de
- * gente: pediu atendimento humano, assinou a ficha etc. Sem isso o pedido
- * ficava só num cartão do painel que expira em 30 minutos.
+ * Avisa o escritório, no WhatsApp (grupo da equipe ou números individuais),
+ * quando um lead precisa de gente: pediu atendimento humano, assinou a ficha
+ * etc. Sem isso o pedido ficava só num cartão do painel que expira em 30
+ * minutos.
  *
- * Configuração em `organizations.settings.ownerAlerts` = { channelId, phones }.
+ * Configuração em `organizations.settings.ownerAlerts` =
+ * { channelId, phones, groupJid }.
  * Sem configuração, não faz nada. Nunca lança: aviso é acessório e não pode
  * derrubar o fluxo que o chamou.
  */
@@ -32,6 +40,12 @@ export class OwnerAlertService {
     return n.slice(0, 2) + n.slice(-8);
   }
 
+  /** JID do grupo de avisos, se houver um válido configurado. */
+  private groupTarget(cfg: OwnerAlertsConfig): string | null {
+    const jid = String(cfg.groupJid ?? '').trim();
+    return jid.endsWith('@g.us') ? jid : null;
+  }
+
   private async config(
     organizationId: string,
   ): Promise<OwnerAlertsConfig | null> {
@@ -42,13 +56,9 @@ export class OwnerAlertService {
     const cfg = ((org?.settings ?? {}) as Record<string, any>).ownerAlerts as
       | OwnerAlertsConfig
       | undefined;
-    if (
-      !cfg?.channelId ||
-      !Array.isArray(cfg.phones) ||
-      cfg.phones.length === 0
-    ) {
-      return null;
-    }
+    if (!cfg?.channelId) return null;
+    const hasPhones = Array.isArray(cfg.phones) && cfg.phones.length > 0;
+    if (!hasPhones && !this.groupTarget(cfg)) return null;
     return cfg;
   }
 
@@ -138,9 +148,16 @@ export class OwnerAlertService {
       const instance = String(c.instance ?? c.instanceName ?? '').trim();
       if (!baseUrl || !apiKey || !instance) return;
 
-      for (const phone of cfg.phones ?? []) {
-        let number = String(phone).replace(/[^0-9]/g, '');
-        if (number.length <= 11) number = `55${number}`;
+      // Com grupo configurado o aviso vai só para ele; senão, um a um.
+      const group = this.groupTarget(cfg);
+      const targets = group
+        ? [group]
+        : (cfg.phones ?? []).map((phone) => {
+            const digits = String(phone).replace(/[^0-9]/g, '');
+            return digits.length <= 11 ? `55${digits}` : digits;
+          });
+
+      for (const number of targets) {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 15_000);
         try {
