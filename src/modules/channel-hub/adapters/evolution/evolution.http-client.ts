@@ -167,6 +167,20 @@ export class EvolutionHttpClient {
     return res.data?.profilePictureUrl || null;
   }
 
+  /** Nome (assunto) de um grupo. `null` se o provider não souber informar. */
+  async fetchGroupSubject(
+    channel: Channel,
+    groupJid: string,
+  ): Promise<string | null> {
+    const cfg = this.cfg(channel);
+    const res = await this.client(cfg).get(
+      `/group/findGroupInfos/${encodeURIComponent(cfg.instance)}`,
+      { params: { groupJid } },
+    );
+    const subject = String(res.data?.subject ?? '').trim();
+    return subject || null;
+  }
+
   /** Baixa os bytes de uma URL pública de mídia (ex.: foto em pps.whatsapp.net). */
   async getMediaBuffer(mediaUrl: string): Promise<Buffer> {
     const response = await axios.get(mediaUrl, {

@@ -45,6 +45,13 @@ export class EvolutionContactEnricherService {
       });
       if (!contactChannel) return;
 
+      // Grupo: o webhook de mensagem não traz o nome do grupo, só o de quem
+      // falou. Sem buscar aqui, todo grupo aparecia como "Desconhecido".
+      const isGroup = externalContactId.endsWith('@g.us');
+      if (isGroup && !contactChannel.contact.name?.trim()) {
+        await this.syncGroupName(channel, externalContactId, contactChannel.contact);
+      }
+
       // `null` cobre também a URL herdada de outro ambiente (localhost, túnel
       // antigo): o arquivo não está aqui, então rebuscamos.
       const ageDays = this.uploads.avatarAgeInDays(
@@ -67,6 +74,12 @@ export class EvolutionContactEnricherService {
         where: { id: contactChannel.contactId },
         data: { metadata: { ...metadata, avatarCheckedAt: new Date().toISOString() } },
       });
+
+      // Na revalidação periódica da foto, aproveita pra pegar um nome de
+      // grupo que tenha mudado.
+      if (isGroup && contactChannel.contact.name?.trim()) {
+        await this.syncGroupName(channel, externalContactId, contactChannel.contact);
+      }
 
       const avatarUrl = await this.downloadAvatar(
         channel,
@@ -104,6 +117,30 @@ export class EvolutionContactEnricherService {
       this.logger.warn(
         `Evolution contact enrichment failed for ${externalContactId}: ${err.message}`,
       );
+    }
+  }
+
+  /** Grava o nome atual do grupo no contato e avisa o inbox aberto. */
+  private async syncGroupName(
+    channel: Channel,
+    groupJid: string,
+    contact: { id: string; organizationId: string; name: string | null; avatarUrl: string | null },
+  ): Promise<void> {
+    try {
+      const subject = await this.httpClient.fetchGroupSubject(channel, groupJid);
+      if (!subject || subject === contact.name) return;
+      await this.prisma.contact.update({
+        where: { id: contact.id },
+        data: { name: subject },
+      });
+      this.realtime.emitToOrg(contact.organizationId, 'contact:avatar', {
+        contactId: contact.id,
+        avatarUrl: contact.avatarUrl ?? null,
+        name: subject,
+      });
+      this.logger.log(`Evolution group named: ${groupJid} → "${subject}"`);
+    } catch (err: any) {
+      this.logger.debug(`Sem nome pro grupo ${groupJid}: ${err.message}`);
     }
   }
 
