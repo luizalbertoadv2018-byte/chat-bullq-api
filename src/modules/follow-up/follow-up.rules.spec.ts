@@ -2,6 +2,7 @@ import { isWithinBusinessHours, nextBusinessInstant } from './business-hours.uti
 import {
   buildFollowUpNote,
   classifyStage,
+  DEFAULT_FOLLOW_UP_HOURS,
   delayForStep,
   isBasicDocument,
   isOptOut,
@@ -44,6 +45,41 @@ describe('horário comercial', () => {
   it('sem configuração vale 24/7', () => {
     const d = new Date('2026-10-18T05:00:00Z');
     expect(nextBusinessInstant(null, TZ, d)).toEqual(d);
+  });
+});
+
+describe('horário próprio do follow-up (seg a sex, 8h às 19h)', () => {
+  const cfg = resolveFollowUpConfig(undefined, null, { force: true });
+
+  it('é o padrão quando a organização não define outro', () => {
+    expect(cfg.businessHours).toBe(DEFAULT_FOLLOW_UP_HOURS);
+  });
+
+  it('não envia às 19h30 de um dia útil', () => {
+    const d = new Date('2026-10-13T22:30:00Z'); // terça 19:30 em SP
+    expect(isWithinBusinessHours(cfg.businessHours, TZ, d)).toBe(false);
+    expect(nextBusinessInstant(cfg.businessHours, TZ, d).toISOString()).toBe(
+      '2026-10-14T11:00:00.000Z', // quarta 08:00
+    );
+  });
+
+  it('sexta à noite e sábado vão para segunda às 8h', () => {
+    const friday = new Date('2026-10-16T23:00:00Z'); // sexta 20:00 em SP
+    const saturday = new Date('2026-10-17T15:00:00Z'); // sábado 12:00 em SP
+    for (const d of [friday, saturday]) {
+      expect(nextBusinessInstant(cfg.businessHours, TZ, d).toISOString()).toBe(
+        '2026-10-19T11:00:00.000Z', // segunda 08:00
+      );
+    }
+  });
+
+  it('envia às 18h59 e não às 19h00', () => {
+    expect(
+      isWithinBusinessHours(cfg.businessHours, TZ, new Date('2026-10-13T21:59:00Z')),
+    ).toBe(true);
+    expect(
+      isWithinBusinessHours(cfg.businessHours, TZ, new Date('2026-10-13T22:00:00Z')),
+    ).toBe(false);
   });
 });
 

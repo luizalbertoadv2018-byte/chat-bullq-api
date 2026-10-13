@@ -97,9 +97,7 @@ export class FollowUpProcessor extends WorkerHost {
       where: { id: conversationId },
       include: {
         contact: { select: { id: true, name: true, metadata: true } },
-        organization: {
-          select: { watchdogBusinessHours: true, aiTimezone: true },
-        },
+        organization: { select: { aiTimezone: true } },
       },
     });
     if (!conversation || conversation.deletedAt) return { skipped: 'gone' };
@@ -166,7 +164,7 @@ export class FollowUpProcessor extends WorkerHost {
 
     // Fora do horário: espera a próxima janela (sem gastar tentativa).
     const tz = conversation.organization.aiTimezone || 'America/Sao_Paulo';
-    const hours = conversation.organization.watchdogBusinessHours as unknown as BusinessHours;
+    const hours: BusinessHours = cfg.businessHours;
     const now = new Date();
     if (!cfg.testMode && !isWithinBusinessHours(hours, tz, now)) {
       const next = nextBusinessInstant(hours, tz, now);

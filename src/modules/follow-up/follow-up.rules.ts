@@ -1,3 +1,5 @@
+import type { BusinessHours } from './business-hours.util';
+
 /**
  * Regras puras do follow-up: em que etapa cabe, quando parar e o que dizer à
  * IA. Sem banco aqui, pra dar pra testar.
@@ -60,6 +62,12 @@ export interface FollowUpSettings {
   /** Horas após a última tentativa até ir para "Sem Retorno". */
   exhaustAfterHours?: number;
   /**
+   * Quando a IA pode mandar follow-up. Próprio do follow-up (não é o horário
+   * geral de atendimento): retomar um lead é iniciativa nossa, então só em
+   * dia útil e hora comercial. Padrão: seg a sex, 08:00 às 19:00.
+   */
+  businessHours?: BusinessHours;
+  /**
    * Resumo diário no grupo de avisos. `true` liga mesmo com o follow-up
    * desligado; sem valor, acompanha `enabled`.
    */
@@ -73,11 +81,24 @@ export interface ResolvedFollowUpConfig {
   cadenceMinutes: number[];
   exhaustAfterMinutes: number;
   dailyCap: number;
+  businessHours: BusinessHours;
   /** Cadência de teste: sem sorteio de atraso. */
   testMode: boolean;
 }
 
 const DEFAULT_CADENCE_HOURS = [24, 96];
+
+const WORKDAY = { enabled: true, windows: [['08:00', '19:00']] as Array<[string, string]> };
+/** Seg a sex, 08:00 às 19:00. Sábado e domingo fora. */
+export const DEFAULT_FOLLOW_UP_HOURS: NonNullable<BusinessHours> = {
+  monday: WORKDAY,
+  tuesday: WORKDAY,
+  wednesday: WORKDAY,
+  thursday: WORKDAY,
+  friday: WORKDAY,
+  saturday: { enabled: false },
+  sunday: { enabled: false },
+};
 
 export function resolveFollowUpConfig(
   settings: FollowUpSettings | undefined,
@@ -101,6 +122,7 @@ export function resolveFollowUpConfig(
         ? state.exhaustAfterMinutes
         : (settings?.exhaustAfterHours ?? 72) * 60,
     dailyCap: settings?.dailyCap ?? 30,
+    businessHours: settings?.businessHours ?? DEFAULT_FOLLOW_UP_HOURS,
     testMode: testCadence.length > 0,
   };
 }
