@@ -3,6 +3,10 @@ import { AutomationTrigger, Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../database/prisma.service';
 import { OutboxService } from '../../../automations/outbox/outbox.service';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
+import {
+  isStageTagName,
+  normalizeTagName,
+} from '../../../pipelines/stage-tag.util';
 
 /**
  * Tags a conversation with one or more labels. If a tag name doesn't exist
@@ -45,7 +49,7 @@ export class TagConversationTool implements AiTool {
     ctx: ToolContext,
   ): Promise<ToolResult> {
     const raw = Array.isArray(input.tags) ? (input.tags as unknown[]) : [];
-    const names = Array.from(
+    const requested = Array.from(
       new Set(
         raw
           .map((t) => String(t).trim().toLowerCase())
@@ -53,16 +57,41 @@ export class TagConversationTool implements AiTool {
       ),
     );
 
-    if (names.length === 0) {
+    if (requested.length === 0) {
       return { output: { ok: false, error: 'no valid tag names' } };
     }
 
-    const existing = await this.prisma.tag.findMany({
-      where: { organizationId: ctx.organizationId, name: { in: names } },
+    // Etiqueta de etapa (recepção, proposta aceita, contrato assinado...) é
+    // do sistema: ele mantém uma só, a da etapa atual do funil. Se a IA
+    // também aplicasse, elas voltariam a se acumular na conversa.
+    const names = requested.filter((n) => !isStageTagName(n));
+    if (names.length === 0) {
+      return {
+        output: {
+          ok: true,
+          applied: [],
+          note: 'A etiqueta de etapa é aplicada automaticamente pelo funil.',
+        },
+      };
+    }
+
+    // Reaproveita etiqueta já existente com o mesmo nome escrito de outro
+    // jeito ("bloqueio-rede-social" x "bloqueio rede social") em vez de criar
+    // uma duplicata.
+    const orgTags = await this.prisma.tag.findMany({
+      where: { organizationId: ctx.organizationId },
       select: { id: true, name: true },
+      orderBy: { name: 'asc' },
     });
-    const existingByName = new Map(existing.map((t) => [t.name, t.id]));
-    const toCreate = names.filter((n) => !existingByName.has(n));
+    const existing: { id: string; name: string }[] = [];
+    const toCreate: string[] = [];
+    for (const name of names) {
+      const found =
+        orgTags.find((t) => t.name === name) ??
+        orgTags.find((t) => normalizeTagName(t.name) === normalizeTagName(name));
+      if (!found) toCreate.push(name);
+      else if (!existing.some((t) => t.id === found.id)) existing.push(found);
+    }
 
     const created = toCreate.length
       ? await this.prisma.$transaction(

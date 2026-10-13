@@ -8,6 +8,7 @@ import {
 import { CardStatus, PipelineStageType } from '@prisma/client';
 import { PrismaService } from '../../database/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { applyStageTag } from './stage-tag.util';
 import {
   CreateCardDto,
   CreatePipelineDto,
@@ -386,6 +387,20 @@ export class PipelinesService {
         },
         data: { situacaoId },
       });
+
+      // A etiqueta de etapa acompanha: sai a da etapa anterior, entra a atual.
+      const situacao = await this.prisma.conversationSituacao.findUnique({
+        where: { id: situacaoId },
+        select: { name: true },
+      });
+      if (situacao) {
+        await applyStageTag(
+          this.prisma,
+          organizationId,
+          conversationId,
+          situacao.name,
+        );
+      }
     } catch (err: any) {
       this.logger.warn(
         `situação não sincronizada (conv ${conversationId}): ${err?.message ?? err}`,
