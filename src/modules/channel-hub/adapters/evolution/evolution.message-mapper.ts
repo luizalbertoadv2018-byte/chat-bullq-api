@@ -213,7 +213,7 @@ export class EvolutionMessageMapper {
           payload: {
             key: {
               remoteJid: contactExternalId,
-              fromMe: false,
+              fromMe: c.reaction?.targetFromMe ?? false,
               id: c.reaction?.targetMessageId,
             },
             reaction: c.reaction?.emoji ?? '',

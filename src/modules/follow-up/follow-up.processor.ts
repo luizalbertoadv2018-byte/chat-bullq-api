@@ -112,10 +112,15 @@ export class FollowUpProcessor extends WorkerHost {
     const { cfg } = await this.followUp.configFor(conversation);
     if (!cfg.enabled) return this.stop(conversationId, 'disabled');
 
-    // Só é follow-up se fomos nós a falar por último.
+    // Só é follow-up se fomos nós a falar por último. Reação nossa não
+    // conta como fala: reagir à mensagem do lead não é responder.
     const [lastMessage, lastInbound] = await Promise.all([
       this.prisma.message.findFirst({
-        where: { conversationId, revokedAt: null },
+        where: {
+          conversationId,
+          revokedAt: null,
+          NOT: { type: 'REACTION', direction: MessageDirection.OUTBOUND },
+        },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.message.findFirst({

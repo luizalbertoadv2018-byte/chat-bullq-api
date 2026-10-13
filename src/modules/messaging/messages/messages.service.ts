@@ -419,6 +419,115 @@ export class MessagesService {
     return message;
   }
 
+  /** Canais em que o provider aceita reação enviada por nós (só WhatsApp). */
+  private static readonly REACTION_CHANNEL_TYPES: ChannelType[] = [
+    ChannelType.WHATSAPP_ZAPPFY,
+    ChannelType.WHATSAPP_OFFICIAL,
+    ChannelType.WHATSAPP_EVOLUTION,
+  ];
+
+  /**
+   * Reage a uma mensagem com um emoji (ou remove a reação, com emoji vazio).
+   * Persiste uma Message REACTION apontando pro externalId da mensagem-alvo —
+   * mesmo formato das reações que chegam do cliente, então a UI agrega as
+   * duas do mesmo jeito. NÃO passa pelo `send()`: reagir não é responder, não
+   * deve roubar a conversa do responsável, pausar a IA nem subir a conversa
+   * na lista.
+   */
+  async react(
+    messageId: string,
+    emoji: string,
+    senderId: string,
+    organizationId: string,
+    access: ChannelAccess = 'ALL',
+  ) {
+    const target = await this.prisma.message.findUnique({
+      where: { id: messageId },
+      include: {
+        conversation: {
+          include: {
+            channel: true,
+            contact: { include: { channels: true } },
+          },
+        },
+      },
+    });
+    if (!target) throw new NotFoundException('Message not found');
+    const conversation = target.conversation;
+    if (conversation.organizationId !== organizationId) {
+      throw new ForbiddenException();
+    }
+    this.channelAccess.assertChannelAccess(access, conversation.channelId);
+
+    if (
+      !MessagesService.REACTION_CHANNEL_TYPES.includes(conversation.channel.type)
+    ) {
+      throw new BadRequestException('Este canal não suporta reações.');
+    }
+    if (target.type === MessageContentType.REACTION) {
+      throw new BadRequestException('Não dá pra reagir a uma reação.');
+    }
+    if (target.revokedAt) {
+      throw new BadRequestException('Não dá pra reagir a uma mensagem apagada.');
+    }
+    if (!target.externalId) {
+      throw new BadRequestException(
+        'Mensagem ainda não foi sincronizada com o provider — tente novamente em alguns segundos.',
+      );
+    }
+
+    const contactChannel = conversation.contact.channels.find(
+      (cc) => cc.channelId === conversation.channelId,
+    );
+    if (!contactChannel) {
+      throw new NotFoundException('Contact channel not found');
+    }
+
+    const content = {
+      reaction: {
+        emoji: emoji.trim(),
+        targetMessageId: target.externalId,
+        targetFromMe: target.direction === MessageDirection.OUTBOUND,
+      },
+    };
+
+    const message = await this.repository.create({
+      conversationId: conversation.id,
+      direction: MessageDirection.OUTBOUND,
+      type: MessageContentType.REACTION,
+      content,
+      status: MessageStatus.QUEUED,
+      senderId,
+    });
+
+    this.realtimeGateway.emitToChannel(conversation.channelId, 'message:new', {
+      message,
+      conversationId: conversation.id,
+      contactId: conversation.contactId,
+    });
+    this.realtimeGateway.emitToConversation(conversation.id, 'message:new', {
+      message,
+    });
+
+    await this.outboundQueue.add(
+      'send-outbound',
+      {
+        messageId: message.id,
+        channelId: conversation.channelId,
+        contactExternalId: contactChannel.externalId,
+        message: { type: MessageContentType.REACTION, content },
+      },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 3000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+
+    return message;
+  }
+
   /** Canais para os quais é permitido encaminhar (só WhatsApp). */
   private static readonly FORWARD_TARGET_TYPES: ChannelType[] = [
     ChannelType.WHATSAPP_ZAPPFY,

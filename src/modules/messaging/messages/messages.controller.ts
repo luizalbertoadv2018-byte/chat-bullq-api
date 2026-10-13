@@ -19,6 +19,7 @@ import { UploadsService } from './uploads.service';
 import { MediaResolverService } from './media-resolver.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ForwardMessageDto } from './dto/forward-message.dto';
+import { ReactMessageDto } from './dto/react-message.dto';
 import { JwtAuthGuard, OrgGuard, RolesGuard } from '../../../common/guards';
 import {
   CurrentUser,
@@ -63,6 +64,21 @@ export class MessagesController {
     @CurrentChannelAccess() access: ChannelAccess,
   ) {
     return this.service.forward(id, dto, userId, orgId, access);
+  }
+
+  @Post(':id/react')
+  @ApiOperation({
+    summary:
+      'Reagir a uma mensagem com um emoji (WhatsApp). Emoji vazio remove a reação.',
+  })
+  react(
+    @Param('id') id: string,
+    @Body() dto: ReactMessageDto,
+    @CurrentUser('id') userId: string,
+    @CurrentOrg('id') orgId: string,
+    @CurrentChannelAccess() access: ChannelAccess,
+  ) {
+    return this.service.react(id, dto.emoji, userId, orgId, access);
   }
 
   @Post('uploads/audio')

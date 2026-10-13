@@ -83,6 +83,7 @@ export class FollowUpSummaryService {
       JOIN LATERAL (
         SELECT m.direction, m.created_at FROM messages m
         WHERE m.conversation_id = c.id
+          AND NOT (m.type = 'REACTION' AND m.direction = 'OUTBOUND')
         ORDER BY m.created_at DESC LIMIT 1
       ) lm ON true
       WHERE c.organization_id = ${organizationId} ${channelCond}

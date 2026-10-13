@@ -39,7 +39,12 @@ export interface NormalizedMessageContent {
   caption?: string;
   latitude?: number;
   longitude?: number;
-  reaction?: { emoji: string; targetMessageId: string };
+  reaction?: {
+    emoji: string;
+    targetMessageId: string;
+    /** Outbound: a mensagem-alvo foi enviada por nós (baileys exige no key). */
+    targetFromMe?: boolean;
+  };
   interactive?: { type: string; buttonId?: string; listRowId?: string };
   /**
    * Telefones (só dígitos, com DDI) a mencionar. Vale apenas em grupo.
