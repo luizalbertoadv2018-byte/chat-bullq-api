@@ -17,8 +17,10 @@ import {
 import {
   AUDIT_FOLLOW_UP_EXHAUSTED,
   AUDIT_FOLLOW_UP_SENT,
+  FOLLOW_UP_BACKFILL_JOB,
   FOLLOW_UP_JOB,
   FOLLOW_UP_QUEUE,
+  FollowUpBackfillData,
   FOLLOW_UP_SUMMARY_JOB,
   FollowUpJobData,
   NO_RETURN_STAGE,
@@ -59,6 +61,9 @@ export class FollowUpProcessor extends WorkerHost {
 
   async process(job: Job<FollowUpJobData>): Promise<unknown> {
     if (job.name === FOLLOW_UP_SUMMARY_JOB) return this.summary.sendAll();
+    if (job.name === FOLLOW_UP_BACKFILL_JOB) {
+      return this.followUp.backfill(job.data as unknown as FollowUpBackfillData);
+    }
     if (job.name !== FOLLOW_UP_JOB) return { skipped: 'unknown-job' };
     try {
       const result = await this.handle(job.data.conversationId, String(job.id));

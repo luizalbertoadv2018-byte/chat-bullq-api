@@ -6,14 +6,24 @@ import { PipelinesService } from '../pipelines/pipelines.service';
 import {
   FOLLOW_UP_JOB,
   FOLLOW_UP_QUEUE,
+  FollowUpBackfillData,
   FollowUpJobData,
   FollowUpSettings,
   FollowUpState,
   NO_RETURN_STAGE,
+  PRE_SIGN_STAGES,
   ResolvedFollowUpConfig,
+  normalizeStage,
   delayForStep,
   resolveFollowUpConfig,
 } from './follow-up.rules';
+
+export interface BackfillItem {
+  conversationId: string;
+  name: string | null;
+  stage: string;
+  inMinutes: number;
+}
 
 /** Atraso sorteado pra os envios não saírem todos no mesmo minuto. */
 const JITTER_MAX_MS = 10 * 60 * 1000;
@@ -226,6 +236,87 @@ export class FollowUpService {
         `follow-up onInbound falhou (conv ${conversationId}): ${err?.message ?? err}`,
       );
     }
+  }
+
+  /**
+   * Leva inicial: conversas que JÁ estavam paradas (nós falamos por último e
+   * o lead sumiu) antes de o follow-up existir, e que por isso nunca foram
+   * agendadas. Entram poucas por vez, espaçadas, começando por quem está
+   * mais perto de assinar.
+   */
+  async backfill(data: FollowUpBackfillData): Promise<{ scheduled: BackfillItem[] }> {
+    const limit = Math.min(Math.max(data.limit ?? 10, 1), 30);
+    const spacingMs = Math.max(data.spacingMinutes ?? 12, 1) * 60_000;
+
+    const rows = await this.prisma.$queryRaw<
+      { id: string; name: string | null; stage: string; last_at: Date; metadata: any }[]
+    >`
+      SELECT c.id, ct.name, st.name AS stage, lm.created_at AS last_at, c.metadata
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      JOIN LATERAL (
+        SELECT ca.stage_id FROM cards ca
+        WHERE ca.conversation_id = c.id ORDER BY ca.updated_at DESC LIMIT 1
+      ) card ON true
+      JOIN pipeline_stages st ON st.id = card.stage_id
+      JOIN LATERAL (
+        SELECT m.direction, m.created_at FROM messages m
+        WHERE m.conversation_id = c.id AND m.revoked_at IS NULL
+        ORDER BY m.created_at DESC LIMIT 1
+      ) lm ON true
+      WHERE c.organization_id = ${data.organizationId}
+        AND c.deleted_at IS NULL AND c.is_group = false AND c.is_archived = false
+        AND c.ai_enabled IS DISTINCT FROM false
+        AND lm.direction = 'OUTBOUND'
+        AND lm.created_at < now() - interval '20 hours'
+        AND lm.created_at > now() - interval '14 days'
+    `;
+
+    const candidates = rows
+      .filter((r) => PRE_SIGN_STAGES.includes(normalizeStage(r.stage)))
+      // Quem já tem follow-up em andamento (ou já esgotou) fica de fora.
+      .filter((r) => {
+        const st = this.readState(r.metadata);
+        return (
+          !st.jobId &&
+          !st.nextAt &&
+          !st.attempts &&
+          !st.paused &&
+          st.stopReason !== 'exhausted'
+        );
+      })
+      .sort((a, b) => {
+        const pa = PRE_SIGN_STAGES.indexOf(normalizeStage(a.stage));
+        const pb = PRE_SIGN_STAGES.indexOf(normalizeStage(b.stage));
+        return pa !== pb ? pa - pb : b.last_at.getTime() - a.last_at.getTime();
+      })
+      .slice(0, limit);
+
+    const scheduled: BackfillItem[] = [];
+    for (const row of candidates) {
+      if (data.force) await this.saveState(row.id, { force: true });
+      const delayMs =
+        60_000 + scheduled.length * spacingMs + Math.floor(Math.random() * 120_000);
+      await this.schedule(row.id, { delayMs });
+      const fresh = await this.prisma.conversation.findUnique({
+        where: { id: row.id },
+        select: { metadata: true },
+      });
+      // schedule() não agenda se o agente da conversa não faz follow-up.
+      if (!this.readState(fresh?.metadata).jobId) continue;
+      scheduled.push({
+        conversationId: row.id,
+        name: row.name,
+        stage: row.stage,
+        inMinutes: Math.round(delayMs / 60_000),
+      });
+    }
+    this.logger.log(
+      `follow-up backfill: ${scheduled.length} conversas na fila (${scheduled
+        .map((s) => `${s.name ?? '?'} [${s.stage}] +${s.inMinutes}min`)
+        .join('; ')})`,
+    );
+    return { scheduled };
   }
 
   /** Pausa ou retoma o follow-up de uma conversa (botão do painel). */

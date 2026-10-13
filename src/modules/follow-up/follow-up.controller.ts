@@ -26,6 +26,22 @@ export class FollowUpController {
     return this.followUp.setPaused(id, orgId, !!body?.paused);
   }
 
+  @Post('backfill')
+  @Roles(OrgRole.OWNER, OrgRole.ADMIN)
+  @ApiOperation({
+    summary: 'Põe na fila de follow-up os leads que já estavam parados (leva limitada)',
+  })
+  async backfill(
+    @CurrentOrg('id') orgId: string,
+    @Body() body: { limit?: number; force?: boolean },
+  ) {
+    return this.followUp.backfill({
+      organizationId: orgId,
+      limit: body?.limit,
+      force: body?.force,
+    });
+  }
+
   @Post('summary/run')
   @Roles(OrgRole.OWNER, OrgRole.ADMIN)
   @ApiOperation({ summary: 'Envia agora o resumo diário para o grupo de avisos' })

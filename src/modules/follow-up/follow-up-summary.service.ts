@@ -36,7 +36,9 @@ export class FollowUpSummaryService {
     for (const org of orgs) {
       const settings = (org.settings ?? {}) as Record<string, any>;
       const fu = settings.followUp as FollowUpSettings | undefined;
-      if (!fu?.enabled || fu.summary === false) continue;
+      const on =
+        fu?.summary === true || (fu?.enabled === true && fu.summary !== false);
+      if (!on) continue;
       if (await this.sendFor(org.id)) sent++;
     }
     return { sent };
