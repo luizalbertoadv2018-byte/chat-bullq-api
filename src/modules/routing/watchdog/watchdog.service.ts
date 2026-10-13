@@ -56,6 +56,8 @@ export class WatchdogService {
 
     if (!conversation) return;
     if (!conversation.organization.watchdogEnabled) return;
+    // IA nunca responde em grupo: agendar aqui só gerava tentativa barrada.
+    if (conversation.isGroup) return;
     if (conversation.aiEnabled === false) {
       // Humano desativou IA explicitamente — watchdog respeita.
       return;

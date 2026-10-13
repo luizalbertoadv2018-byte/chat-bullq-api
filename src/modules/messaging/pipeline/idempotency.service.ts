@@ -77,6 +77,19 @@ export class IdempotencyService implements OnModuleDestroy {
     );
   }
 
+  /**
+   * Devolve a mensagem pra fila de tentativas: apaga a trava criada pelo
+   * `claimProcessing`. Usar quando o processamento FALHOU — sem isso a nova
+   * tentativa encontra a trava, acha que é duplicata e a mensagem some.
+   */
+  async releaseClaim(
+    externalMessageId: string,
+    channelId: string,
+  ): Promise<void> {
+    if (!externalMessageId) return;
+    await this.redis.del(this.key(channelId, externalMessageId));
+  }
+
   async isDuplicate(
     externalMessageId: string,
     channelId: string,

@@ -380,7 +380,9 @@ export class PipelinesService {
         where: {
           id: conversationId,
           organizationId,
-          NOT: { situacaoId },
+          // `NOT: { situacaoId }` não casaria com conversa ainda sem situação
+          // (NULL <> x é NULL no SQL).
+          OR: [{ situacaoId: null }, { situacaoId: { not: situacaoId } }],
         },
         data: { situacaoId },
       });

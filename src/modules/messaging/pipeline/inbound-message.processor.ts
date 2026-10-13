@@ -303,6 +303,9 @@ export class InboundMessageProcessor extends WorkerHost {
           }
           return result;
         },
+        // Vídeo e foto grande chegam em base64 e ocupam o processo por vários
+        // segundos; com os 5s padrão a transação vencia antes de gravar.
+        { timeout: 30_000, maxWait: 10_000 },
       );
 
       this.realtimeGateway.emitToChannel(channelId, 'message:new', {
@@ -480,8 +483,10 @@ export class InboundMessageProcessor extends WorkerHost {
         await this.webhookEvents.markFailed(webhookEventId, err.message);
       }
       // Release the claim so retries can try again — next attempt re-acquires.
+      // (Antes isto chamava markProcessed, que faz o oposto: a nova tentativa
+      // era descartada como duplicata e a mensagem do cliente se perdia.)
       await this.idempotency
-        .markProcessed(message.externalMessageId, channelId)
+        .releaseClaim(message.externalMessageId, channelId)
         .catch(() => undefined);
       throw err;
     }
