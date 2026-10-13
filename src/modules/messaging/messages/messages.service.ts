@@ -28,6 +28,7 @@ import {
   ChannelAccessService,
 } from '../../iam/channel-access/channel-access.service';
 import { WatchdogService } from '../../routing/watchdog/watchdog.service';
+import { FollowUpService } from '../../follow-up/follow-up.service';
 import { SegmentReadService } from '../../segments/segment-read.service';
 import { ChannelAdapterRegistry } from '../../channel-hub/channel-adapter.registry';
 import { ContactResolverService } from '../pipeline/contact-resolver.service';
@@ -52,6 +53,7 @@ export class MessagesService {
     private readonly realtimeGateway: RealtimeGateway,
     private readonly channelAccess: ChannelAccessService,
     private readonly watchdog: WatchdogService,
+    private readonly followUp: FollowUpService,
     private readonly adapterRegistry: ChannelAdapterRegistry,
     private readonly segmentRead: SegmentReadService,
     private readonly contactResolver: ContactResolverService,
@@ -290,6 +292,8 @@ export class MessagesService {
     // zera o contador de tentativas. Se a IA estava paralisada e quem
     // resolveu foi a pessoa, conversa não deve aparecer como "presa".
     this.watchdog.cancelCheck(conversation.id).catch(() => undefined);
+    // Um humano está conduzindo: a IA não faz follow-up por cima.
+    void this.followUp.cancel(conversation.id, 'human-replied');
 
     // Replying = reading. The sender obviously saw the inbound stream
     // before typing — bump their lastReadAt so the unread badge resets

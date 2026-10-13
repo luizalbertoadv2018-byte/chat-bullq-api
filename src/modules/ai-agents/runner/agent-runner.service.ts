@@ -75,6 +75,12 @@ interface RunInput {
   conversation: Conversation;
   triggerMessage: Message;
   /**
+   * Rodada iniciada pelo sistema, sem mensagem nova do cliente (follow-up).
+   * O texto vira o turno final do histórico, marcado como aviso do sistema,
+   * e diz à IA o que fazer nesta rodada.
+   */
+  systemNote?: string;
+  /**
    * Internal: how many auto-chained runs already happened in this turn.
    * Bounded to avoid infinite recursion when an agent delegates back and
    * forth. Set automatically on chained calls, callers shouldn't pass this.
@@ -115,6 +121,7 @@ export class AiAgentRunnerService {
   async run({
     conversation,
     triggerMessage,
+    systemNote,
     chainDepth = 0,
   }: RunInput): Promise<void> {
     // IA nunca responde em grupo — trava dura no ponto de execução. Cobre
@@ -143,7 +150,10 @@ export class AiAgentRunnerService {
       // Curto-circuito por intenção: spam/ruído com confiança alta não merece
       // rodar agente LLM nenhum. O classifier (fugu, barato) já decidiu —
       // apenas ignoramos. Economiza 100% do run que antes caía no Augusto.
+      // Em rodada do sistema o gatilho é uma mensagem ANTIGA do cliente (um
+      // "ok" de dias atrás): classificá-la como ruído calaria o follow-up.
       if (
+        !systemNote &&
         selection?.classifiedIntent === IntentType.SPAM_OR_NOISE &&
         (selection.classifierConfidence ?? 0) >= SPAM_SKIP_CONFIDENCE
       ) {
@@ -285,6 +295,7 @@ export class AiAgentRunnerService {
       skillInstructions,
       catalog,
       caseState,
+      systemNote,
     });
 
     // Fase 2.5: augmenta o system message com Security Layer (prepend)

@@ -22,6 +22,8 @@ export interface PromptContext {
   triggerMessage: Message;
   /** Estado do caso lido do banco (ficha, etapa, documentos). Ver CaseStateService. */
   caseState?: string | null;
+  /** Rodada iniciada pelo sistema (follow-up): instrução no lugar da fala do cliente. */
+  systemNote?: string | null;
   /** Extra prompt fragments contributed by the agent's active skills. */
   skillInstructions?: string[];
   /** Compact product catalog for sales agents — name + slug + 1 line each.
@@ -546,7 +548,16 @@ export class PromptBuilderService {
     // respondeu após último inbound, etc). Empurra um turno user neutro com
     // o triggerMessage pra forçar a alternância e dar contexto explícito.
     const tail = messages[messages.length - 1];
-    if (!tail || tail.role !== 'user') {
+    if (ctx.systemNote) {
+      // Rodada do sistema: o turno final é o aviso, não a última fala do
+      // cliente (repeti-la faria a IA responder de novo a algo já respondido).
+      const note = `[aviso do sistema, não é mensagem do cliente] ${ctx.systemNote}`;
+      if (tail && tail.role === 'user' && typeof tail.content === 'string') {
+        tail.content = `${tail.content}\n\n${note}`;
+      } else {
+        messages.push({ role: 'user', content: note });
+      }
+    } else if (!tail || tail.role !== 'user') {
       const triggerParts = this.extractContentParts(
         ctx.triggerMessage,
         ctx.mediaUrls,

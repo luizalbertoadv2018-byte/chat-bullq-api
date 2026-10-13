@@ -8,6 +8,7 @@ import { GmailSendService } from './gmail-send.service';
 import { PipelinesService } from '../../pipelines/pipelines.service';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { OwnerAlertService } from '../../owner-alerts/owner-alert.service';
+import { FollowUpService } from '../../follow-up/follow-up.service';
 import { ClientGroupService } from '../../owner-alerts/client-group.service';
 import {
   MessageContentType,
@@ -73,6 +74,7 @@ export class TramitacaoSyncProcessor extends WorkerHost {
     private readonly realtime: RealtimeGateway,
     private readonly ownerAlerts: OwnerAlertService,
     private readonly clientGroups: ClientGroupService,
+    private readonly followUp: FollowUpService,
   ) {
     super();
   }
@@ -302,6 +304,8 @@ export class TramitacaoSyncProcessor extends WorkerHost {
       this.logger.log(
         `pós-assinatura: pedido de documentos enviado (conv ${conversation.id}${collector ? `; agente de coleta ${collector.name} assumiu` : ''})`,
       );
+      // Pedimos os documentos: se o cliente sumir, a IA cobra o que faltar.
+      void this.followUp.schedule(conversation.id);
     } catch (err: any) {
       this.logger.warn(
         `pós-assinatura: não enviou o pedido de documentos p/ contato ${contact.id}: ${err?.message ?? err}`,

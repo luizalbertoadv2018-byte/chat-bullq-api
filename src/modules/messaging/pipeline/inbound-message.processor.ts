@@ -16,6 +16,7 @@ import { AiAgentRunnerService } from '../../ai-agents/runner/agent-runner.servic
 import { TranscriptionService } from '../messages/transcription.service';
 import { OutboxService } from '../../automations/outbox/outbox.service';
 import { WatchdogService } from '../../routing/watchdog/watchdog.service';
+import { FollowUpService } from '../../follow-up/follow-up.service';
 import { SalesRecoveryService } from '../../sales-recovery/sales-recovery.service';
 import { DriveService } from '../drive/drive.service';
 import { TramitacaoService } from '../tramitacao/tramitacao.service';
@@ -112,6 +113,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly transcription: TranscriptionService,
     private readonly outbox: OutboxService,
     private readonly watchdog: WatchdogService,
+    private readonly followUp: FollowUpService,
     private readonly salesRecovery: SalesRecoveryService,
     private readonly drive: DriveService,
     private readonly tramitacao: TramitacaoService,
@@ -364,6 +366,8 @@ export class InboundMessageProcessor extends WorkerHost {
             `Watchdog scheduleCheck failed for conv ${conversationId}: ${err?.message ?? err}`,
           ),
         );
+        // O lead falou: para o follow-up (e tira o card de "Sem Retorno").
+        void this.followUp.onInbound(conversationId);
         // Recuperação de vendas: se a conversa tem card em "Tentativa de
         // Contato", o lead respondeu → move pra "Em Contato". No-op fora disso.
         this.salesRecovery.onInboundReply(conversationId).catch((err) =>
@@ -880,6 +884,8 @@ export class InboundMessageProcessor extends WorkerHost {
             `Watchdog cancelCheck failed for conv ${conversationId}: ${err?.message ?? err}`,
           ),
         );
+      // A IA falou por último: começa a contar o silêncio do lead.
+      void this.followUp.schedule(conversationId);
     } catch (err: any) {
       this.logger.error(
         `Debounced agent run failed for conv ${conversationId}: ${err?.message ?? err}`,

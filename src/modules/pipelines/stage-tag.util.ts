@@ -35,6 +35,7 @@ const STAGE_TAG_KEYS = new Set([
   'contrato assinado',
   'aguardando documentos',
   'desqualificado',
+  'sem retorno',
 ]);
 
 export function isStageTagName(name: string): boolean {

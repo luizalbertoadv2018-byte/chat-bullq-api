@@ -14,6 +14,7 @@ import { UpdateConversationDto } from './dto/update-conversation.dto';
 import { RealtimeGateway } from '../../realtime/realtime.gateway';
 import { PrismaService } from '../../../database/prisma.service';
 import { syncConversationStatus } from './conversation-status-sync';
+import { FollowUpService } from '../../follow-up/follow-up.service';
 import { ChannelAdapterRegistry } from '../../channel-hub/channel-adapter.registry';
 import { HistoryImportService } from '../pipeline/history-import.service';
 import {
@@ -65,6 +66,7 @@ export class ConversationsService {
     private readonly channelAccess: ChannelAccessService,
     private readonly agentRouter: AgentRouterService,
     private readonly agentRunner: AiAgentRunnerService,
+    private readonly followUp: FollowUpService,
     private readonly segmentRead: SegmentReadService,
     private readonly projects: ProjectsService,
     private readonly zappfyHttp: ZappfyHttpClient,
@@ -568,6 +570,7 @@ export class ConversationsService {
       aiEnabled: enabled,
       actorId,
     });
+    if (enabled === false) void this.followUp.cancel(id, 'ai-off');
     return updated;
   }
 
