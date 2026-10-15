@@ -31,6 +31,15 @@ export class CaseStateService {
       const meta = (input.contactMetadata ?? {}) as Record<string, any>;
       const signed = meta.tramitacaoReleased === true;
       const pending = !!meta.pendingCadastro?.docToken;
+      // Botão "Gerar contrato": o advogado atendeu na mão e passou só o
+      // fechamento. Vale até a ficha ser gerada.
+      const fechamento =
+        !signed && !pending && meta.fechamentoManual?.templateId
+          ? (meta.fechamentoManual as {
+              templateId: string;
+              templateName?: string;
+            })
+          : null;
 
       const card = await this.prisma.card.findFirst({
         where: {
@@ -42,7 +51,7 @@ export class CaseStateService {
       });
 
       // Sem card e sem ficha não há estado a informar (ex.: agente de triagem).
-      if (!card && !signed && !pending) return null;
+      if (!card && !signed && !pending && !fechamento) return null;
 
       const lines: string[] = [
         '═══ ESTADO DO CASO (registro do sistema) ═══',
@@ -57,6 +66,10 @@ export class CaseStateService {
       } else if (pending) {
         lines.push(
           '- Ficha/contrato: JÁ GERADA e o link já foi enviado. Aguardando o cliente assinar.',
+        );
+      } else if (fechamento) {
+        lines.push(
+          `- Ficha/contrato: o advogado já atendeu este cliente e mandou FECHAR com o modelo "${fechamento.templateName ?? fechamento.templateId}" (templateId ${fechamento.templateId}). Ficha ainda não gerada.`,
         );
       } else {
         lines.push('- Ficha/contrato: ainda não gerada.');
@@ -119,6 +132,12 @@ export class CaseStateService {
           'REGRAS para este estado: NÃO gere outra ficha e não refaça triagem nem proposta. ' +
             'Se o cliente disser que assinou, agradeça e siga o que o seu roteiro manda para depois da assinatura (a confirmação chega sozinha ao sistema). ' +
             'Se ele não achar o link, chame enviarDocumentoAssinatura normalmente: o sistema devolve o link que já existe.',
+        );
+      } else if (fechamento) {
+        lines.push(
+          'REGRAS para este estado: é PROIBIDO refazer a triagem ou a proposta; o atendimento já foi feito pelo advogado. ' +
+            `Sua única tarefa é fechar: use enviarDocumentoAssinatura (detalharModelo e depois enviarModelo) SEMPRE com o templateId ${fechamento.templateId}, nunca outro modelo. ` +
+            'Peça só os dados do modelo que ainda faltam, sem repetir o que o cliente já informou, e envie o link de assinatura assim que tiver tudo.',
         );
       }
 

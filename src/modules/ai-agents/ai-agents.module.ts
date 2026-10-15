@@ -68,6 +68,6 @@ import { CaseStateService } from './runner/case-state.service';
     CatalogSyncService,
     MediaUrlResolverService,
   ],
-  exports: [AiAgentRunnerService, AgentRouterService],
+  exports: [AiAgentRunnerService, AgentRouterService, ToolsModule],
 })
 export class AiAgentsModule {}

@@ -75,6 +75,32 @@ describe('CaseStateService', () => {
     expect(text).toContain('NÃO gere outra ficha');
   });
 
+  it('botão Gerar contrato: manda fechar com o modelo escolhido, sem triagem', async () => {
+    const svc = build(null);
+    const text = await svc.describe({
+      ...base,
+      contactMetadata: {
+        fechamentoManual: { templateId: 'tpl_9', templateName: 'Honorários BPC' },
+      },
+    });
+    expect(text).toContain('mandou FECHAR com o modelo "Honorários BPC"');
+    expect(text).toContain('templateId tpl_9');
+    expect(text).toContain('PROIBIDO refazer a triagem');
+  });
+
+  it('botão Gerar contrato: depois da ficha gerada, vale a regra da ficha pendente', async () => {
+    const svc = build({ stage: { name: 'Ficha Enviada' } });
+    const text = await svc.describe({
+      ...base,
+      contactMetadata: {
+        fechamentoManual: { templateId: 'tpl_9' },
+        pendingCadastro: { docToken: 'tok' },
+      },
+    });
+    expect(text).toContain('JÁ GERADA');
+    expect(text).not.toContain('mandou FECHAR');
+  });
+
   it('lead em triagem: só informa a etapa', async () => {
     const svc = build({ stage: { name: 'Em Análise' } });
     const text = await svc.describe({ ...base, contactMetadata: {} });

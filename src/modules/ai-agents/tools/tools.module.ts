@@ -92,6 +92,11 @@ import { DocumentosBeneficioModule } from '../../documentos-beneficio/documentos
     HttpToolExecutorService,
     SqlToolExecutorService,
   ],
-  exports: [ToolRegistry, HttpToolExecutorService, SqlToolExecutorService],
+  exports: [
+    ToolRegistry,
+    HttpToolExecutorService,
+    SqlToolExecutorService,
+    ZapSignClientService,
+  ],
 })
 export class ToolsModule {}

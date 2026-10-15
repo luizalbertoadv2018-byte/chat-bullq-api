@@ -321,6 +321,33 @@ export class ConversationsController {
     );
   }
 
+  @Get(':id/ai/contract-templates')
+  @ApiOperation({
+    summary: 'List ZapSign contract templates for the "Gerar contrato" button.',
+  })
+  listContractTemplates(
+    @Param('id') id: string,
+    @CurrentOrg('id') orgId: string,
+    @CurrentChannelAccess() access: ChannelAccess,
+  ) {
+    return this.service.listContractTemplates(id, orgId, access);
+  }
+
+  @Post(':id/ai/start-contract')
+  @ApiOperation({
+    summary:
+      'Hand the closing to an AI agent: pins the agent, marks the contact in contract mode with the chosen ZapSign template and engages the agent straight into collecting the contract data (no triage).',
+  })
+  startContract(
+    @Param('id') id: string,
+    @CurrentOrg('id') orgId: string,
+    @CurrentUser('id') userId: string,
+    @CurrentChannelAccess() access: ChannelAccess,
+    @Body() body: { agentId: string; templateId: string },
+  ) {
+    return this.service.startContract(id, orgId, body, userId, access);
+  }
+
   @Post(':id/close')
   @ApiOperation({ summary: 'Close a conversation' })
   close(

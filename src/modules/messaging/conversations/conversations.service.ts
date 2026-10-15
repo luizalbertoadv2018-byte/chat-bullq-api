@@ -38,6 +38,7 @@ import {
 } from '../../channel-hub/avatars/avatar-hydration.constants';
 import { ZappfyContactEnricherService } from '../../channel-hub/adapters/zappfy/zappfy-contact-enricher.service';
 import { UploadsService } from '../messages/uploads.service';
+import { ZapSignClientService } from '../../ai-agents/tools/client-ops/zapsign-client.service';
 
 const SYNC_MESSAGE_PAGE_SIZE = 50;
 const SYNC_MAX_PAGES = 4;
@@ -73,6 +74,7 @@ export class ConversationsService {
     private readonly contactEnricher: ZappfyContactEnricherService,
     private readonly llm: LlmService,
     private readonly uploads: UploadsService,
+    private readonly zapsign: ZapSignClientService,
     @InjectQueue(AVATAR_HYDRATION_QUEUE)
     private readonly avatarQueue: Queue<AvatarHydrationJob>,
   ) {}
@@ -651,6 +653,7 @@ export class ConversationsService {
     agentId: string,
     actorId: string,
     access: ChannelAccess = 'ALL',
+    systemNote?: string,
   ): Promise<{ engaged: boolean; reason?: string; agentName?: string }> {
     const conversation = await this.findOne(id, organizationId, access);
 
@@ -715,6 +718,7 @@ export class ConversationsService {
       .run({
         conversation: updated as Conversation,
         triggerMessage,
+        systemNote,
       })
       .catch((err) =>
         this.logger.error(
@@ -723,6 +727,116 @@ export class ConversationsService {
       );
 
     return { engaged: true, agentName: agent.name };
+  }
+
+  /** Modelos de contrato da conta ZapSign, para o botão "Gerar contrato". */
+  async listContractTemplates(
+    id: string,
+    organizationId: string,
+    access: ChannelAccess = 'ALL',
+  ): Promise<Array<{ token: string; name: string }>> {
+    await this.findOne(id, organizationId, access);
+    if (!this.zapsign.isConfigured()) {
+      throw new BadRequestException('ZapSign não está configurada.');
+    }
+    return this.zapsign.listTemplates();
+  }
+
+  /**
+   * Botão "Gerar contrato": o advogado fez o atendimento na mão e passa só o
+   * fechamento para um agente. Marca o modo fechamento no contato (o estado
+   * do caso repete a instrução a cada rodada, até a ficha sair) e aciona o
+   * agente escolhido já com o aviso de ir direto à coleta dos dados.
+   */
+  async startContract(
+    id: string,
+    organizationId: string,
+    input: { agentId: string; templateId: string },
+    actorId: string,
+    access: ChannelAccess = 'ALL',
+  ): Promise<{ engaged: boolean; reason?: string; agentName?: string }> {
+    const conversation = await this.findOne(id, organizationId, access);
+    if (!input?.agentId || !input?.templateId) {
+      throw new BadRequestException('Informe o agente e o modelo de contrato.');
+    }
+    if (conversation.isGroup) {
+      throw new BadRequestException('Não dá para gerar contrato em grupo.');
+    }
+    // Mesmo gate da tool enviarDocumentoAssinatura (tool-registry).
+    const zapsignAgents = (process.env.ZAPSIGN_AGENT_IDS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (zapsignAgents.length > 0 && !zapsignAgents.includes(input.agentId)) {
+      throw new BadRequestException(
+        'Este agente não tem permissão para enviar contratos pela ZapSign.',
+      );
+    }
+
+    const contact = await this.prisma.contact.findUnique({
+      where: { id: conversation.contactId },
+      select: { metadata: true },
+    });
+    const meta = (contact?.metadata ?? {}) as Record<string, any>;
+    if (meta.tramitacaoReleased === true) {
+      throw new BadRequestException('Este cliente já assinou o contrato.');
+    }
+
+    const templates = await this.listContractTemplates(
+      id,
+      organizationId,
+      access,
+    );
+    const template = templates.find((t) => t.token === input.templateId);
+    if (!template) {
+      throw new NotFoundException('Modelo não encontrado na ZapSign.');
+    }
+
+    await this.prisma.contact.update({
+      where: { id: conversation.contactId },
+      data: {
+        metadata: {
+          ...meta,
+          fechamentoManual: {
+            templateId: template.token,
+            templateName: template.name,
+            startedAt: new Date().toISOString(),
+            startedBy: actorId,
+          },
+        },
+      },
+    });
+
+    await this.prisma.conversationAuditLog.create({
+      data: {
+        conversationId: id,
+        actorId,
+        action: 'AI_CONTRACT_STARTED',
+        metadata: {
+          agentId: input.agentId,
+          templateId: template.token,
+          templateName: template.name,
+        },
+      },
+    });
+
+    const note =
+      'O advogado já fez o atendimento deste cliente manualmente e decidiu FECHAR o contrato. ' +
+      'NÃO refaça a triagem, não refaça a proposta e não repita perguntas já respondidas no histórico. ' +
+      `Vá direto ao fechamento com o modelo "${template.name}" (templateId ${template.token}): ` +
+      '1) chame enviarDocumentoAssinatura com acao "detalharModelo" e esse templateId para ver os campos; ' +
+      '2) aproveite os dados que já aparecem na conversa; ' +
+      '3) peça ao cliente, com cordialidade e em poucas mensagens, só os dados que faltam; ' +
+      '4) com tudo em mãos, chame acao "enviarModelo" com esse mesmo templateId e envie o link de assinatura.';
+
+    return this.setActiveAgent(
+      id,
+      organizationId,
+      input.agentId,
+      actorId,
+      access,
+      note,
+    );
   }
 
   async close(
