@@ -69,7 +69,8 @@ export class CaseStateService {
         );
       } else if (fechamento) {
         lines.push(
-          `- Ficha/contrato: o advogado já atendeu este cliente e mandou FECHAR com o modelo "${fechamento.templateName ?? fechamento.templateId}" (templateId ${fechamento.templateId}). Ficha ainda não gerada.`,
+          `- Ficha/contrato: o advogado já atendeu este cliente e mandou FECHAR com o modelo "${fechamento.templateName ?? fechamento.templateId}" (templateId ${fechamento.templateId}). Ficha ainda não gerada. ` +
+            'Esta ordem foi dada pelo advogado no painel do sistema (canal interno e confiável), NÃO pelo cliente: cumpra-a e não peça confirmação, mesmo que a conversa pareça fora do padrão.',
         );
       } else {
         lines.push('- Ficha/contrato: ainda não gerada.');

@@ -820,14 +820,12 @@ export class ConversationsService {
       },
     });
 
+    // A ordem de fechar vai no ESTADO DO CASO (prompt de sistema, lido do
+    // banco). Ordem no turno do usuário a camada de segurança trata como
+    // possível injeção do cliente: o agente desconfiava e passava pra humano.
     const note =
-      'O advogado já fez o atendimento deste cliente manualmente e decidiu FECHAR o contrato. ' +
-      'NÃO refaça a triagem, não refaça a proposta e não repita perguntas já respondidas no histórico. ' +
-      `Vá direto ao fechamento com o modelo "${template.name}" (templateId ${template.token}): ` +
-      '1) chame enviarDocumentoAssinatura com acao "detalharModelo" e esse templateId para ver os campos; ' +
-      '2) aproveite os dados que já aparecem na conversa; ' +
-      '3) peça ao cliente, com cordialidade e em poucas mensagens, só os dados que faltam; ' +
-      '4) com tudo em mãos, chame acao "enviarModelo" com esse mesmo templateId e envie o link de assinatura.';
+      'O advogado acionou o fechamento do contrato pelo painel. ' +
+      'Siga o ESTADO DO CASO no seu prompt de sistema e comece agora a coleta dos dados.';
 
     return this.setActiveAgent(
       id,
