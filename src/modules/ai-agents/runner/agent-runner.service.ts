@@ -152,15 +152,29 @@ export class AiAgentRunnerService {
       // apenas ignoramos. Economiza 100% do run que antes caía no Augusto.
       // Em rodada do sistema o gatilho é uma mensagem ANTIGA do cliente (um
       // "ok" de dias atrás): classificá-la como ruído calaria o follow-up.
+      // A PRIMEIRA mensagem de uma conversa nunca é descartada: lead de
+      // anúncio chega com frase pronta e o classifier marcava como spam.
       if (
         !systemNote &&
         selection?.classifiedIntent === IntentType.SPAM_OR_NOISE &&
         (selection.classifierConfidence ?? 0) >= SPAM_SKIP_CONFIDENCE
       ) {
+        const priorInbound = await this.prisma.message.count({
+          where: {
+            conversationId: conversation.id,
+            direction: 'INBOUND',
+            id: { not: triggerMessage.id },
+          },
+        });
+        if (priorInbound > 0) {
+          this.logger.log(
+            `Conv ${conversation.id}: intent=SPAM_OR_NOISE (conf=${selection.classifierConfidence}) — skipping agent run`,
+          );
+          return;
+        }
         this.logger.log(
-          `Conv ${conversation.id}: intent=SPAM_OR_NOISE (conf=${selection.classifierConfidence}) — skipping agent run`,
+          `Conv ${conversation.id}: intent=SPAM_OR_NOISE na 1ª mensagem — atendendo mesmo assim`,
         );
-        return;
       }
     }
     const agent = selection
