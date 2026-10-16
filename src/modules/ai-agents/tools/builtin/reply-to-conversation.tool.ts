@@ -10,6 +10,7 @@ import { PrismaService } from '../../../../database/prisma.service';
 import { RealtimeGateway } from '../../../realtime/realtime.gateway';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { containsMetaTalk, findForbiddenUrlHosts } from '../../runner/text-guards';
+import { withPendingSigningLink } from './signing-link-registry';
 
 /**
  * Sends a TEXT message to the contact on behalf of the agent. The message
@@ -48,8 +49,8 @@ export class ReplyToConversationTool implements AiTool {
     input: Record<string, unknown>,
     ctx: ToolContext,
   ): Promise<ToolResult> {
-    const text = String(input.text ?? '').trim();
-    if (!text) {
+    const agentText = String(input.text ?? '').trim();
+    if (!agentText) {
       return { output: { ok: false, error: 'text is empty' } };
     }
 
@@ -59,9 +60,9 @@ export class ReplyToConversationTool implements AiTool {
     // Devolve erro pro LLM com instrução clara — ele tem outra chance
     // dentro do mesmo run pra escrever uma resposta de verdade ou usar
     // transferToHuman. MAX_TOOL_ITERATIONS limita loop infinito.
-    if (containsMetaTalk(text)) {
+    if (containsMetaTalk(agentText)) {
       this.logger.warn(
-        `[meta-talk-guard] blocked reply on conv=${ctx.conversationId} run=${ctx.runId} agent=${ctx.agentId}: "${text.slice(0, 120)}"`,
+        `[meta-talk-guard] blocked reply on conv=${ctx.conversationId} run=${ctx.runId} agent=${ctx.agentId}: "${agentText.slice(0, 120)}"`,
       );
       return {
         output: {
@@ -99,10 +100,10 @@ export class ReplyToConversationTool implements AiTool {
     const whitelist =
       (conversation?.organization?.allowedUrlDomains as string[] | null) ??
       null;
-    const forbidden = findForbiddenUrlHosts(text, whitelist);
+    const forbidden = findForbiddenUrlHosts(agentText, whitelist);
     if (forbidden.length > 0) {
       this.logger.warn(
-        `[url-guard] blocked reply on conv=${ctx.conversationId} run=${ctx.runId}: forbidden hosts=${forbidden.join(',')} text="${text.slice(0, 120)}"`,
+        `[url-guard] blocked reply on conv=${ctx.conversationId} run=${ctx.runId}: forbidden hosts=${forbidden.join(',')} text="${agentText.slice(0, 120)}"`,
       );
       return {
         output: {
@@ -125,6 +126,11 @@ export class ReplyToConversationTool implements AiTool {
         },
       };
     }
+
+    // Ficha recém-gerada: o link de assinatura vai nesta resposta mesmo que
+    // o agente tenha esquecido de colar. Depois dos guards de propósito: o
+    // link vem da ZapSign, não do modelo.
+    const text = withPendingSigningLink(ctx.conversationId, agentText);
 
     const message = await this.prisma.message.create({
       data: {

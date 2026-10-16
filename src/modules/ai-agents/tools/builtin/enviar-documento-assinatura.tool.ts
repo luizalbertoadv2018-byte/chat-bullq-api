@@ -6,6 +6,13 @@ import { ZapSignClientService } from '../client-ops/zapsign-client.service';
 import { PipelinesService } from '../../../pipelines/pipelines.service';
 import { PrismaService } from '../../../../database/prisma.service';
 import { DocumentPdfService } from '../client-ops/document-pdf.service';
+import { rememberSigningLink } from './signing-link-registry';
+
+// A ZapSign não manda o link sozinha (envio automático desligado): quem
+// entrega é a resposta do agente. Se ele esquecer, replyToConversation cola.
+const LINK_INSTRUCAO =
+  'Documento gerado. O cliente AINDA NÃO RECEBEU o link: ele não foi por e-mail nem por WhatsApp. ' +
+  'Na sua resposta (replyToConversation), cole o linkAssinatura exatamente como está e diga em uma frase como assinar (abrir o link, conferir os dados e assinar na tela).';
 
 /**
  * Envia um documento (procuração, contrato de honorários, etc.) para o
@@ -180,6 +187,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
       try {
         const doc = await this.zapsign.getDocument(pendingToken);
         link = doc.signers[0]?.signUrl ?? null;
+        if (link) rememberSigningLink(ctx.conversationId, link);
       } catch (err: any) {
         this.logger.warn(
           `ficha pendente ${pendingToken}: não consegui reler o link: ${err?.message ?? err}`,
@@ -572,6 +580,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
         this.stashCadastroForSignature(input, ctx, doc.docToken);
         this.moveCardToFichaEnviada(ctx);
         const linkModelo = doc.signers[0]?.signUrl ?? null;
+        if (linkModelo) rememberSigningLink(ctx.conversationId, linkModelo);
         return {
           output: {
             ok: true,
@@ -580,7 +589,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
             linkAssinatura: linkModelo,
             signatarios: doc.signers,
             instrucao: linkModelo
-              ? 'Contrato gerado do modelo. Compartilhe o linkAssinatura com o cliente (ou ele já recebeu por e-mail/WhatsApp).'
+              ? LINK_INSTRUCAO
               : 'Contrato gerado do modelo; o link foi enviado ao signatário pelos canais configurados.',
           },
         };
@@ -680,6 +689,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
       this.moveCardToFichaEnviada(ctx);
 
       const link = doc.signers[0]?.signUrl ?? null;
+      if (link) rememberSigningLink(ctx.conversationId, link);
       return {
         output: {
           ok: true,
@@ -689,7 +699,7 @@ export class EnviarDocumentoAssinaturaTool implements AiTool {
           ...(pdfLocalUrl ? { pdfGerado: pdfLocalUrl } : {}),
           signatarios: doc.signers,
           instrucao: link
-            ? 'Documento criado. Compartilhe o linkAssinatura com o cliente (ou ele já recebeu por e-mail/WhatsApp se configurado).'
+            ? LINK_INSTRUCAO
             : 'Documento criado; o link de assinatura foi enviado ao signatário pelos canais configurados.',
         },
       };
