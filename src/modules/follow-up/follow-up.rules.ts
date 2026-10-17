@@ -178,6 +178,22 @@ export function isBasicDocument(name: string): boolean {
   return BASIC_DOC.test(normalizeStage(name));
 }
 
+/**
+ * Documentos da lista que o follow-up ainda cobra. Normalmente só os básicos
+ * (o resto fica com a equipe). Num funil só de coleta, sem nenhum documento
+ * básico na lista (ex.: comprovação de gratuidade), a lista inteira é do
+ * agente, então todos os que faltam são cobrados.
+ */
+export function docsToChase(
+  docs: Array<{ id: string; name: string }>,
+  received: Record<string, unknown>,
+): string[] {
+  const chaseAll = !docs.some((d) => isBasicDocument(d.name));
+  return docs
+    .filter((d) => (chaseAll || isBasicDocument(d.name)) && !received[d.id])
+    .map((d) => d.name);
+}
+
 const OPT_OUT =
   /\b(nao tenho (mais )?interesse|sem interesse|nao quero( mais)?|nao preciso( mais)?|ja resolvi|ja consegui|ja recuperei|pare de|para de|nao (me )?mande mais|nao (me )?chame mais|me tira|desisti|vou desistir|deixa (pra la|quieto))\b/;
 

@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AiTool, ToolContext, ToolResult } from '../tool.types';
 import { PrismaService } from '../../../../database/prisma.service';
 import { DocumentosBeneficioService } from '../../../documentos-beneficio/documentos-beneficio.service';
+import { PipelinesService } from '../../../pipelines/pipelines.service';
 import { matchDocumento } from './documento-match.util';
+
+/** Etapa para onde o card vai quando o último documento da lista chega (se o funil tiver). */
+const DOCS_COMPLETE_STAGE = 'Documentos Completos';
 
 /**
  * Checklist de documentos do benefício do lead. A IA usa pra saber o que o
@@ -20,7 +24,8 @@ export class ChecklistDocumentosTool implements AiTool {
     'Ações: "faltantes" → lista o que o cliente AINDA precisa enviar (use pra cobrar); ' +
     '"ver" → lista completa com o que já foi recebido; ' +
     '"marcar" → marca um documento como RECEBIDO (passe "documento" com o nome, ex.: "RG", "CNIS", "laudo") — ' +
-    'use quando o cliente enviar/confirmar um documento. Sempre confira o checklist antes de dizer que pode protocolar.';
+    'use quando o cliente enviar/confirmar um documento. Se o cliente disser que NÃO TEM o documento (ex.: não tem cartão de crédito), ' +
+    'marque do mesmo jeito e explique em "observacao" (ex.: "declarou não ter cartão"). Sempre confira o checklist antes de dizer que pode protocolar.';
   readonly parameters = {
     type: 'object',
     additionalProperties: false,
@@ -32,12 +37,19 @@ export class ChecklistDocumentosTool implements AiTool {
         description: 'Em "marcar": nome do documento recebido (casa por aproximação).',
         maxLength: 80,
       },
+      observacao: {
+        type: 'string',
+        description:
+          'Em "marcar": nota curta para a equipe, ex.: "declarou não ter cartão", "só tem conta no Nubank".',
+        maxLength: 200,
+      },
     },
   };
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly documentos: DocumentosBeneficioService,
+    private readonly pipelines: PipelinesService,
   ) {}
 
   private norm(s: string): string {
@@ -113,7 +125,11 @@ export class ChecklistDocumentosTool implements AiTool {
       }
       const novos = {
         ...recebidos,
-        [doc.id]: { recebido: true, em: new Date().toISOString() },
+        [doc.id]: {
+          recebido: true,
+          em: new Date().toISOString(),
+          ...(input.observacao ? { obs: String(input.observacao).slice(0, 200) } : {}),
+        },
       };
       await this.prisma.contact.update({
         where: { id: ctx.contactId },
@@ -123,6 +139,9 @@ export class ChecklistDocumentosTool implements AiTool {
       this.logger.log(
         `checklist: marcado "${doc.name}" recebido (contato ${ctx.contactId}); faltam ${faltam.length}`,
       );
+      if (faltam.length === 0) {
+        await this.moveToDocsComplete(agent.pipelineId, ctx);
+      }
       return {
         output: {
           ok: true,
@@ -137,6 +156,7 @@ export class ChecklistDocumentosTool implements AiTool {
     const lista = docs.map((d) => ({
       documento: d.name,
       recebido: !!recebidos[d.id],
+      ...(recebidos[d.id]?.obs ? { observacao: recebidos[d.id].obs } : {}),
     }));
     const faltantes = lista.filter((d) => !d.recebido).map((d) => d.documento);
     return {
@@ -148,5 +168,27 @@ export class ChecklistDocumentosTool implements AiTool {
         ...(acao === 'ver' ? { checklist: lista } : {}),
       },
     };
+  }
+
+  /**
+   * Lista completa: se o funil do agente tem a etapa "Documentos Completos",
+   * o card da conversa vai pra lá (a equipe vê no kanban o que já dá pra
+   * juntar nos autos). Funil sem essa etapa: nada muda. Nunca derruba a tool.
+   */
+  private async moveToDocsComplete(pipelineId: string, ctx: ToolContext): Promise<void> {
+    try {
+      const stage = await this.prisma.pipelineStage.findFirst({
+        where: { pipelineId, name: { equals: DOCS_COMPLETE_STAGE, mode: 'insensitive' } },
+        select: { id: true },
+      });
+      if (!stage) return;
+      await this.pipelines.moveConversationCardsToStage(
+        ctx.conversationId,
+        ctx.organizationId,
+        DOCS_COMPLETE_STAGE,
+      );
+    } catch (err) {
+      this.logger.warn(`checklist: não moveu card p/ ${DOCS_COMPLETE_STAGE}: ${(err as Error).message}`);
+    }
   }
 }

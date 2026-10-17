@@ -26,7 +26,7 @@ import {
   NO_RETURN_STAGE,
   buildFollowUpNote,
   classifyStage,
-  isBasicDocument,
+  docsToChase,
   isOptOut,
 } from './follow-up.rules';
 
@@ -314,8 +314,6 @@ export class FollowUpProcessor extends WorkerHost {
     });
     const received = (((contactMetadata ?? {}) as Record<string, any>).documentos ??
       {}) as Record<string, unknown>;
-    return docs
-      .filter((d) => isBasicDocument(d.name) && !received[d.id])
-      .map((d) => d.name);
+    return docsToChase(docs, received);
   }
 }

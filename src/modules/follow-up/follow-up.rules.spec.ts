@@ -4,6 +4,7 @@ import {
   classifyStage,
   DEFAULT_FOLLOW_UP_HOURS,
   delayForStep,
+  docsToChase,
   isBasicDocument,
   isOptOut,
   resolveFollowUpConfig,
@@ -164,5 +165,33 @@ describe('regras do follow-up', () => {
     });
     expect(note).toContain('Comprovante de residência');
     expect(note).not.toContain('última retomada');
+  });
+});
+
+describe('docsToChase', () => {
+  const pos = [
+    { id: 'a', name: 'RG ou CNH (frente e verso)' },
+    { id: 'b', name: 'Comprovante de residência' },
+    { id: 'c', name: 'Extrato do benefício' },
+  ];
+  const gratuidade = [
+    { id: 'g1', name: 'Declarações de Imposto de Renda' },
+    { id: 'g2', name: 'Extratos bancários dos últimos 3 meses' },
+    { id: 'g3', name: 'Faturas dos cartões de crédito' },
+  ];
+
+  it('funil com documentos básicos: cobra só os básicos que faltam', () => {
+    expect(docsToChase(pos, { a: { recebido: true } })).toEqual(['Comprovante de residência']);
+  });
+
+  it('funil só de coleta (sem básico): cobra todos os que faltam', () => {
+    expect(docsToChase(gratuidade, { g2: { recebido: true } })).toEqual([
+      'Declarações de Imposto de Renda',
+      'Faturas dos cartões de crédito',
+    ]);
+  });
+
+  it('tudo recebido: nada a cobrar', () => {
+    expect(docsToChase(gratuidade, { g1: 1, g2: 1, g3: 1 })).toEqual([]);
   });
 });
