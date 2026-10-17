@@ -6,17 +6,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
 import { CreateKnowledgeDto, UpdateKnowledgeDto } from './dto/create-knowledge.dto';
+import {
+  KnowledgeHit,
+  rankKnowledgeChunks,
+  splitIntoChunks,
+} from './knowledge-search.util';
 
 // pdf-parse é CommonJS sem tipos — require devolve a função de extração.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pdfParse: (buffer: Buffer) => Promise<{ text: string }> = require('pdf-parse');
-
-/** Um trecho recuperado da base pra injetar no prompt do agente. */
-export interface KnowledgeHit {
-  title: string;
-  content: string;
-  rank: number;
-}
 
 @Injectable()
 export class KnowledgeService {
@@ -49,10 +47,9 @@ export class KnowledgeService {
     }
   }
 
-  /** Nº de "trechos" só pra exibição (busca é full-text sobre o doc inteiro). */
+  /** Nº de trechos em que a busca divide o documento (exibido na tela). */
   private sectionCount(content: string): number {
-    const paras = content.split(/\n\n+/).filter((p) => p.trim().length > 0);
-    return Math.max(1, paras.length);
+    return Math.max(1, splitIntoChunks(content).length);
   }
 
   async create(
@@ -134,92 +131,22 @@ export class KnowledgeService {
   }
 
   /**
-   * Recupera trechos da base relevantes p/ a mensagem, escopados ao agente.
-   *
-   * Busca por sobreposição de termos em JS (accent- e case-insensitive),
-   * sem depender de embeddings/pgvector nem de extensões do Postgres. Para
-   * uma base curada de guias/FAQ (poucos documentos) isso é preciso e barato:
-   * carrega os docs do agente e pontua por frequência dos termos da pergunta,
-   * com peso extra pra casamento no título. Retorna [] se nada casar.
+   * Recupera os trechos da base mais relevantes p/ a mensagem, escopados ao
+   * agente. Busca por sobreposição de termos em JS (accent- e
+   * case-insensitive), sem embeddings/pgvector. Cada documento é dividido em
+   * trechos e só os melhores trechos voltam (ver knowledge-search.util.ts),
+   * então a resposta no meio de um guia longo também chega à IA.
    */
   async retrieveForAgent(
     agentId: string,
     query: string,
-    limit = 3,
+    limit = 4,
   ): Promise<KnowledgeHit[]> {
-    const terms = tokenize(query);
-    if (!terms.length) return [];
-
+    if (!query?.trim()) return [];
     const docs = await this.prisma.knowledgeDocument.findMany({
       where: { deletedAt: null, agents: { some: { agentId } } },
       select: { title: true, content: true },
     });
-    if (!docs.length) return [];
-
-    const scored = docs
-      .map((d) => {
-        const titleN = normalizeForSearch(d.title);
-        const bodyN = normalizeForSearch(d.content);
-        let score = 0;
-        let matched = 0;
-        for (const t of terms) {
-          const inTitle = countOccurrences(titleN, t);
-          const inBody = countOccurrences(bodyN, t);
-          if (inTitle + inBody > 0) matched++;
-          score += inTitle * 5 + inBody;
-        }
-        // Exige casar ao menos 1 termo "de conteúdo" pra evitar ruído.
-        return { title: d.title, content: d.content, rank: score, matched };
-      })
-      .filter((d) => d.matched > 0 && d.rank > 0)
-      .sort((a, b) => b.rank - a.rank)
-      .slice(0, limit);
-
-    return scored.map(({ title, content, rank }) => ({ title, content, rank }));
+    return rankKnowledgeChunks(docs, query, limit);
   }
-}
-
-// ─── helpers de busca (accent- e case-insensitive) ───────────────────
-
-const STOPWORDS = new Set([
-  'a', 'o', 'as', 'os', 'um', 'uma', 'de', 'do', 'da', 'dos', 'das', 'e', 'ou',
-  'que', 'com', 'sem', 'por', 'para', 'pra', 'no', 'na', 'nos', 'nas', 'em',
-  'ao', 'aos', 'me', 'te', 'se', 'eu', 'voce', 'vc', 'ele', 'ela', 'meu',
-  'minha', 'seu', 'sua', 'como', 'qual', 'quais', 'quanto', 'quanta', 'quando',
-  'onde', 'e', 'ja', 'nao', 'sim', 'isso', 'esse', 'essa', 'este', 'esta',
-  'sobre', 'the', 'of', 'to',
-]);
-
-/** minúsculas + sem acento, colapsa espaços. */
-function normalizeForSearch(text: string): string {
-  return (text || '')
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ');
-}
-
-/** Termos significativos da pergunta (normalizados, sem stopwords/curtos). */
-function tokenize(query: string): string[] {
-  const norm = normalizeForSearch(query);
-  const raw = norm.split(/[^a-z0-9]+/).filter(Boolean);
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const w of raw) {
-    if (w.length < 3 || STOPWORDS.has(w)) continue;
-    if (seen.has(w)) continue;
-    seen.add(w);
-    out.push(w);
-  }
-  return out;
-}
-
-/** Conta ocorrências de `term` (por palavra) no texto já normalizado. */
-function countOccurrences(haystackNorm: string, term: string): number {
-  if (!term) return 0;
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'g');
-  let n = 0;
-  while (re.exec(haystackNorm) !== null) n++;
-  return n;
 }

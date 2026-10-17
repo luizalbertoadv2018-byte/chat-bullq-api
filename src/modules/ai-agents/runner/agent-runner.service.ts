@@ -1128,12 +1128,13 @@ export class AiAgentRunnerService {
       }
 
       try {
-        // Base de conhecimento por agente: full-text search nativa do Postgres
-        // (sem embeddings/pgvector). Escopada só por agente.
-        const kb = await this.knowledge.retrieveForAgent(agentId, triggerText, 3);
+        // Base de conhecimento por agente: busca por termos em JS (sem
+        // embeddings/pgvector), escopada só por agente. Já volta só os
+        // trechos relevantes de cada documento, com teto total no service.
+        const kb = await this.knowledge.retrieveForAgent(agentId, triggerText);
         if (kb.length > 0) {
           const lines = kb
-            .map((r, i) => `${i + 1}. [${r.title}] ${r.content.slice(0, 700)}`)
+            .map((r, i) => `${i + 1}. [${r.title}]\n${r.content}`)
             .join('\n\n');
           knowledgePart = {
             type: 'text',
