@@ -331,17 +331,9 @@ export class ConversationsRepository {
             select: { id: true, name: true, avatarUrl: true },
           },
           situacao: { select: { id: true, name: true, color: true } },
-          messages: {
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-            select: {
-              id: true,
-              type: true,
-              content: true,
-              direction: true,
-              createdAt: true,
-            },
-          },
+          // A última mensagem vem em attachLastMessages: o `take: 1` aninhado
+          // do Prisma lê TODAS as mensagens das conversas da página (com a
+          // mídia em base64) e só corta em memória.
           tags: { include: { tag: true } },
           _count: { select: { messages: true } },
         },
@@ -356,9 +348,10 @@ export class ConversationsRepository {
     // ConversationRead row holds the lastReadAt cursor and we count INBOUND
     // messages newer than that cursor. Conversations the user never opened
     // get every inbound message counted as unread.
+    const withLast = await this.attachLastMessages(conversations);
     const enriched = currentUserId
-      ? await this.attachUnreadCounts(conversations, currentUserId)
-      : conversations.map((c) => ({ ...c, unreadCount: 0 }));
+      ? await this.attachUnreadCounts(withLast, currentUserId)
+      : withLast.map((c) => ({ ...c, unreadCount: 0 }));
 
     if (!search || messageMatches.size === 0) {
       return { conversations: enriched, total };
@@ -436,6 +429,69 @@ export class ConversationsRepository {
       });
     }
     return matches;
+  }
+
+  /**
+   * Última mensagem de cada conversa da página, uma linha por conversa. A
+   * mídia embutida (`mediaUrl` em data URI, que chega a dezenas de MB) fica
+   * de fora: a lista só mostra texto e tipo.
+   */
+  private async attachLastMessages<T extends { id: string }>(
+    conversations: T[],
+  ): Promise<
+    Array<
+      T & {
+        messages: Array<{
+          id: string;
+          type: string;
+          content: Prisma.JsonValue;
+          direction: string;
+          createdAt: Date;
+        }>;
+      }
+    >
+  > {
+    if (conversations.length === 0) return [];
+    const ids = conversations.map((c) => c.id);
+    const rows = await this.prisma.$queryRaw<
+      Array<{
+        conversation_id: string;
+        id: string;
+        type: string;
+        content: Prisma.JsonValue;
+        direction: string;
+        created_at: Date;
+      }>
+    >`
+      SELECT c.id AS conversation_id, m.id, m.type::text AS type, m.direction::text AS direction, m.created_at,
+        CASE WHEN m.content->>'mediaUrl' LIKE 'data:%' THEN m.content - 'mediaUrl' ELSE m.content END AS content
+      FROM unnest(${ids}::text[]) AS c(id)
+      JOIN LATERAL (
+        SELECT id, type, direction, created_at, content
+        FROM messages
+        WHERE conversation_id = c.id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) m ON true
+    `;
+    const byConv = new Map(rows.map((r) => [r.conversation_id, r]));
+    return conversations.map((c) => {
+      const r = byConv.get(c.id);
+      return {
+        ...c,
+        messages: r
+          ? [
+              {
+                id: r.id,
+                type: r.type,
+                content: r.content,
+                direction: r.direction,
+                createdAt: r.created_at,
+              },
+            ]
+          : [],
+      };
+    });
   }
 
   private async attachUnreadCounts<
